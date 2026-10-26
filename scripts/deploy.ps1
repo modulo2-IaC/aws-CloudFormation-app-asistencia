@@ -97,6 +97,14 @@ if (-not (Get-Command aws -ErrorAction SilentlyContinue)) {
     Write-Host "  [WARN] AWS CLI no encontrado." -ForegroundColor Yellow; exit 0
 }
 
+aws sts get-caller-identity | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  [ERROR] Tu sesion de AWS ha expirado o no esta autenticada." -ForegroundColor Red
+    Write-Host "  Por favor ejecuta 'aws login' en tu terminal para autenticarte y vuelve a intentar." -ForegroundColor Yellow
+    Remove-Item $MergedFile -ErrorAction SilentlyContinue
+    exit 1
+}
+
 $modulos = @("red.yaml", "seguridad.yaml", "backend.yaml", "frontend.yaml", "monitoreo.yaml", "main.yaml")
 foreach ($mod in $modulos) {
     $modPath = Join-Path $TemplateDir $mod
