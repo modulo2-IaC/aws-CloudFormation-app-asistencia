@@ -267,6 +267,7 @@ Resources:
             chown ${AdminUsername}:${AdminUsername} /opt/asistencia-backend/ecosystem.config.js
 
             # -----------------------------------------------------------------
+            # -----------------------------------------------------------------
             # 7. Escribir archivo de variables de entorno (.env) de produccion
             # -----------------------------------------------------------------
             echo "[6/8] Escribiendo variables de entorno..."
@@ -275,8 +276,12 @@ Resources:
             DATABASE_URL=${DatabaseUrl}
             JWT_SECRET=${JwtSecret}
             CORS_ORIGIN=${CorsOrigin}
+            RUN_MIGRATIONS=${RunMigrations}
             TZ=${AppTimezone}
             NODE_ENV=production
+            ADMIN_REGISTRATION_NO=123456789
+            ADMIN_PASSWORD=123456789
+            ADMIN_FULL_NAME=ADMIN
             ENVEOF
             chmod 600 /opt/asistencia-backend/.env
             chown ${AdminUsername}:${AdminUsername} /opt/asistencia-backend/.env
@@ -309,13 +314,16 @@ Resources:
             echo "[2/5] Instalando dependencias de Node.js..."
             npm install
 
-            echo "[3/5] Generando cliente Prisma ORM..."
-            npx prisma generate || true
+            # Asegurar soporte de wildcard '*' en CORS si la rama no lo incluye
+            sed -i "s/origin: allowedOrigins.length > 0 ? allowedOrigins : false/origin: allowedOrigins.includes('*') ? true : (allowedOrigins.length > 0 ? allowedOrigins : false)/" src/main.ts
 
             if [ "${RunMigrations}" = "true" ]; then
-              echo "[4/5] Ejecutando migraciones de base de datos..."
-              npx prisma migrate deploy || true
+              echo "[3/5] Ejecutando migraciones TypeORM de base de datos..."
+              npm run migration:run || true
             fi
+
+            echo "[4/5] Verificando / creando usuario administrador inicial..."
+            npm run seed:admin || true
 
             echo "[5/5] Compilando aplicacion TypeScript NestJS..."
             npm run build
@@ -347,10 +355,11 @@ Resources:
             if [ -f /opt/asistencia-backend/package.json ]; then
               cd /opt/asistencia-backend
               sudo -u ${AdminUsername} npm install
-              sudo -u ${AdminUsername} npx prisma generate || true
+              sed -i "s/origin: allowedOrigins.length > 0 ? allowedOrigins : false/origin: allowedOrigins.includes('*') ? true : (allowedOrigins.length > 0 ? allowedOrigins : false)/" src/main.ts
               if [ "${RunMigrations}" = "true" ]; then
-                sudo -u ${AdminUsername} npx prisma migrate deploy || true
+                sudo -u ${AdminUsername} npm run migration:run || true
               fi
+              sudo -u ${AdminUsername} npm run seed:admin || true
               sudo -u ${AdminUsername} npm run build || true
               sudo -u ${AdminUsername} pm2 start ecosystem.config.js || true
               sudo -u ${AdminUsername} pm2 save || true
