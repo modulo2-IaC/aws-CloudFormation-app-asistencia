@@ -33,9 +33,8 @@ Parameters:
     Description: Tipo de instancia EC2.
 
   LatestUbuntuAmiId:
-    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
-    Default: '/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id'
-    Description: Parametro SSM que resuelve la AMI oficial de Ubuntu 22.04 LTS.
+    Type: AWS::EC2::Image::Id
+    Description: ID de la imagen AMI de Ubuntu 22.04 LTS provista por la plantilla principal.
 
   KeyName:
     Type: String
