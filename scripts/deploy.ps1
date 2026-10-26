@@ -130,34 +130,67 @@ if (-not $S3Bucket) {
         if ($detectedAny -and $detectedAny -ne "None") {
             $S3Bucket = $detectedAny
             Write-Host "  [OK] Usando bucket S3: $S3Bucket" -ForegroundColor Green
+        } else {
+            Write-Host "  [ERROR] Se requiere un bucket S3 para empaquetar las plantillas anidadas." -ForegroundColor Red
+            Write-Host "  Especifica uno con -S3Bucket <nombre-bucket> o crea uno en $Region." -ForegroundColor Yellow
+            Remove-Item $MergedFile -ErrorAction SilentlyContinue
+            exit 1
         }
     }
 }
 
 # -----------------------------------------------------------------------------
-# 4. DESPLIEGUE
+# 4. VERIFICACION DE ESTADO DEL STACK PREVIO (ROLLBACK_COMPLETE)
+# -----------------------------------------------------------------------------
+$stackStatus = (aws cloudformation describe-stacks --stack-name "$StackName" --region "$Region" --query "Stacks[0].StackStatus" --output text 2>$null)
+if ($stackStatus -eq "ROLLBACK_COMPLETE") {
+    Write-Host "`n[WARN] El stack '$StackName' esta en estado 'ROLLBACK_COMPLETE' (fallo de despliegue previo)." -ForegroundColor Yellow
+    Write-Host "  Eliminando stack en rollback para permitir recreacion limpia..." -ForegroundColor Yellow
+    aws cloudformation delete-stack --stack-name "$StackName" --region "$Region"
+    aws cloudformation wait stack-delete-complete --stack-name "$StackName" --region "$Region"
+    Write-Host "  [OK] Stack previo eliminado con exito." -ForegroundColor Green
+}
+
+# -----------------------------------------------------------------------------
+# 5. EMPAQUETADO DE PLANTILLAS ANIDADAS (aws cloudformation package)
+# -----------------------------------------------------------------------------
+Write-Host "`nEmpaquetando modulos anidados hacia S3 ($S3Bucket)..." -ForegroundColor Cyan
+$PackagedFile = Join-Path $env:TEMP "packaged-$StackName.yaml"
+aws cloudformation package `
+    --template-file "$TemplateFile" `
+    --s3-bucket "$S3Bucket" `
+    --output-template-file "$PackagedFile" `
+    --region "$Region"
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  [ERROR] Fallo el empaquetado de las plantillas hacia S3." -ForegroundColor Red
+    Remove-Item $MergedFile -ErrorAction SilentlyContinue
+    exit 1
+}
+Write-Host "  [OK] Plantillas anidadas empaquetadas y subidas a S3 con exito." -ForegroundColor Green
+
+# -----------------------------------------------------------------------------
+# 6. DESPLIEGUE
 # -----------------------------------------------------------------------------
 Write-Host "`nDesplegando '$StackName' en '$Region'..." -ForegroundColor Cyan
 
 $mergedUri = "file://" + $MergedFile.Replace('\', '/')
 $deployArgs = @(
     "cloudformation", "deploy",
-    "--template-file", "$TemplateFile",
+    "--template-file", "$PackagedFile",
     "--stack-name", "$StackName",
     "--region", "$Region",
     "--capabilities", "CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND",
     "--parameter-overrides", "$mergedUri"
 )
 
-if ($S3Bucket) {
-    $deployArgs += @("--s3-bucket", "$S3Bucket")
-}
-
 & aws @deployArgs
+$deployExit = $LASTEXITCODE
 
 Remove-Item $MergedFile -ErrorAction SilentlyContinue
+Remove-Item $PackagedFile -ErrorAction SilentlyContinue
 
-if ($LASTEXITCODE -eq 0) {
+if ($deployExit -eq 0) {
     Write-Host "`n============================================================" -ForegroundColor Green
     Write-Host "  Despliegue completado con exito!" -ForegroundColor Green
     Write-Host "============================================================" -ForegroundColor Green
@@ -167,5 +200,5 @@ if ($LASTEXITCODE -eq 0) {
         --output table
 } else {
     Write-Host "`n[ERROR] Fallo el despliegue de '$StackName'." -ForegroundColor Red
-    exit $LASTEXITCODE
+    exit $deployExit
 }
