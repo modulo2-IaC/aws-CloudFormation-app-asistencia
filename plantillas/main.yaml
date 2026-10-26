@@ -235,7 +235,7 @@ Resources:
         FrontendRepoUrl: !Ref FrontendRepoUrl
         FrontendRepoBranch: !Ref FrontendRepoBranch
         NodeVersion: !Ref NodeVersion
-        BackendPublicIP: !GetAtt BackendStack.Outputs.BackendPublicIP
+        BackendPublicIP: !GetAtt BackendStack.Outputs.BackendPrivateIP
 
   # ---------------------------------------------------------------------------
   # 5. Modulo de Observabilidad: Alarmas CloudWatch, SNS, Log Groups

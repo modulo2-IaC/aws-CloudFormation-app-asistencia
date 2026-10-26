@@ -169,11 +169,11 @@ Resources:
             echo "Iniciando provisionamiento del Frontend: $(date)"
 
             # -----------------------------------------------------------------
-            # 2. Habilitar Swap de 1GB (Garantiza compilacion fluida de Vite)
+            # 2. Habilitar Swap de 2GB (Garantiza compilacion fluida de Vite)
             # -----------------------------------------------------------------
             if [ ! -f /swapfile ]; then
-              echo "[1/8] Configurando 1GB de espacio Swap..."
-              fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024
+              echo "[1/8] Configurando 2GB de espacio Swap..."
+              fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
               chmod 600 /swapfile
               mkswap /swapfile
               swapon /swapfile
@@ -279,37 +279,28 @@ Resources:
             <head>
               <meta charset="UTF-8" />
               <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-              <title>Sistema de Asistencia - Frontend en AWS</title>
+              <meta http-equiv="refresh" content="10" />
+              <title>Sistema de Asistencia - Inicializando</title>
               <style>
                 * { box-sizing: border-box; margin: 0; padding: 0; }
-                body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
-                .card { background: #1e293b; border: 1px solid #334155; border-radius: 1rem; padding: 2.5rem; max-width: 580px; width: 100%; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); text-align: center; }
-                .icon { width: 56px; height: 56px; background: rgba(56, 189, 248, 0.15); border: 1px solid #38bdf8; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem; color: #38bdf8; font-size: 1.75rem; }
-                h1 { font-size: 1.6rem; color: #f1f5f9; margin-bottom: 0.75rem; font-weight: 700; }
-                p { color: #94a3b8; font-size: 0.95rem; line-height: 1.6; margin-bottom: 1.25rem; }
-                .badge { display: inline-block; background: #0284c7; color: #f0f9ff; font-size: 0.8rem; font-weight: 600; padding: 0.35rem 0.85rem; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1.5rem; }
-                .box { background: #0f172a; border-radius: 0.5rem; padding: 1rem; text-align: left; font-family: monospace; font-size: 0.85rem; color: #a5f3fc; border: 1px solid #334155; overflow-x: auto; line-height: 1.5; }
+                body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #f8fafc; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
+                .card { background: #1e293b; border: 1px solid #334155; border-radius: 1rem; padding: 2.5rem; max-width: 520px; width: 100%; text-align: center; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); }
+                .spinner { width: 44px; height: 44px; border: 4px solid rgba(56, 189, 248, 0.2); border-top-color: #38bdf8; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 1.5rem; }
+                @keyframes spin { to { transform: rotate(360deg); } }
+                h1 { font-size: 1.4rem; color: #f1f5f9; margin-bottom: 0.5rem; font-weight: 700; }
+                p { color: #94a3b8; font-size: 0.95rem; line-height: 1.5; }
               </style>
             </head>
             <body>
               <div class="card">
-                <div class="icon">&#x2699;</div>
-                <span class="badge">Nginx Activo en AWS EC2</span>
-                <h1>Servidor Frontend Inicializado</h1>
-                <p>La infraestructura en AWS CloudFormation esta operativa. Sube el codigo fuente de <strong>asistencia-front</strong> o ejecuta el script de despliegue para publicar la aplicacion.</p>
-                <div class="box">
-                  # En tu maquina local:<br/>
-                  tar --exclude='node_modules' --exclude='.git' --exclude='dist' -czf frontend.tar.gz -C ../../../../asistencia-front .<br/>
-                  scp frontend.tar.gz ${AdminUsername}@&lt;IP_PUBLICA&gt;:/tmp/<br/><br/>
-                  # Conectate y compila:<br/>
-                  ssh ${AdminUsername}@&lt;IP_PUBLICA&gt;<br/>
-                  ~/deploy.sh
-                </div>
+                <div class="spinner"></div>
+                <h1>Inicializando Frontend Asistencia</h1>
+                <p>Descargando repositorio y compilando aplicacion React con Vite en AWS EC2. Esta pagina se actualizara automaticamente en unos momentos.</p>
               </div>
             </body>
             </html>
             HTMLEOF
-            chown -R ${AdminUsername}:${AdminUsername} /var/www/asistencia-front/dist/index.html
+            chown -R ${AdminUsername}:${AdminUsername} /var/www/asistencia-front/dist
 
             # -----------------------------------------------------------------
             # 7. Configurar variable de entorno VITE_API_URL (Mismo Origen / Sin CORS)
@@ -328,6 +319,7 @@ Resources:
             cat << 'DEPLOYEOF' > /home/${AdminUsername}/deploy.sh
             #!/bin/bash
             set -e
+            export HUSKY=0
             echo "======================================================"
             echo "  Iniciando compilacion y despliegue de asistencia-front"
             echo "======================================================"
@@ -347,13 +339,14 @@ Resources:
             fi
 
             echo "[2/4] Instalando dependencias de Node.js..."
-            npm install
+            npm install --include=dev
 
             echo "Asegurando VITE_API_URL=/api/v1/ para evitar CORS..."
             echo "VITE_API_URL=/api/v1/" > /var/www/asistencia-front/.env
 
             echo "[3/4] Compilando aplicacion web con Vite..."
             npm run build
+            chmod -R 755 /var/www/asistencia-front/dist
 
             echo "[4/4] Recargando servidor web Nginx..."
             sudo systemctl reload nginx
@@ -369,6 +362,7 @@ Resources:
             # 9. Clonar Git (si aplica) y compilar
             # -----------------------------------------------------------------
             echo "[8/8] Verificando repositorio Git inicial..."
+            export HUSKY=0
             if [ -n "${FrontendRepoUrl}" ]; then
               echo "Clonando repositorio Git: ${FrontendRepoUrl} (rama ${FrontendRepoBranch})..."
               git clone -b "${FrontendRepoBranch}" "${FrontendRepoUrl}" /tmp/frontend-repo
@@ -380,8 +374,12 @@ Resources:
             if [ -f /var/www/asistencia-front/package.json ]; then
               cd /var/www/asistencia-front
               echo "VITE_API_URL=/api/v1/" > /var/www/asistencia-front/.env
-              sudo -u ${AdminUsername} npm install
-              sudo -u ${AdminUsername} npm run build
+              chown ${AdminUsername}:${AdminUsername} /var/www/asistencia-front/.env
+              echo "Instalando dependencias de Node.js..."
+              sudo -u ${AdminUsername} -H env HUSKY=0 npm install --include=dev
+              echo "Compilando aplicacion web Vite..."
+              sudo -u ${AdminUsername} -H npm run build
+              chmod -R 755 /var/www/asistencia-front/dist
               systemctl reload nginx
             fi
 
