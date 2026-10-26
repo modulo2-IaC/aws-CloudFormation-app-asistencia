@@ -191,9 +191,11 @@ aws cloudformation package \
      * `AppTimezone`: `America/Caracas`
      * `RunMigrations`: `true`
      * `NodeVersion`: `20`
-     * `BackendRepoUrl`: `https://github.com/Joandrr/asistencia-back.git`
+     * `BackendRepoUrl`: `https://github.com/modulo2-IaC/app-asistencia-backend.git`
+     * `BackendRepoBranch`: `dev`
    * **4. Parametros de Frontend (Vite/React):**
-     * `FrontendRepoUrl`: `https://github.com/Joandrr/asistencia-front.git`
+     * `FrontendRepoUrl`: `https://github.com/modulo2-IaC/app-asistencia-frontend.git`
+     * `FrontendRepoBranch`: `dev`
    * **5. Observabilidad:**
      * `AlertEmail`: *(Tu email para recibir notificaciones SNS)*
 3. Haz clic en **Next**.

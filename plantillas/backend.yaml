@@ -100,8 +100,13 @@ Parameters:
 
   BackendRepoUrl:
     Type: String
-    Default: "https://github.com/Joandrr/asistencia-back.git"
+    Default: "https://github.com/modulo2-IaC/app-asistencia-backend.git"
     Description: URL del repositorio Git del backend.
+
+  BackendRepoBranch:
+    Type: String
+    Default: "dev"
+    Description: Rama Git del repositorio Backend a clonar y desplegar.
 
 # =============================================================================
 # CONDICIONES
@@ -291,8 +296,9 @@ Resources:
             cd /opt/asistencia-backend
 
             if [ -d .git ]; then
-              echo "[1/5] Actualizando codigo desde repositorio Git..."
-              git pull origin main || git pull
+              echo "[1/5] Actualizando codigo desde repositorio Git (rama ${BackendRepoBranch})..."
+              git checkout ${BackendRepoBranch} || true
+              git pull origin ${BackendRepoBranch} || git pull
             fi
 
             if [ ! -f package.json ]; then
@@ -331,8 +337,8 @@ Resources:
             # -----------------------------------------------------------------
             echo "[8/8] Verificando repositorio Git inicial..."
             if [ -n "${BackendRepoUrl}" ]; then
-              echo "Clonando repositorio Git: ${BackendRepoUrl}..."
-              git clone "${BackendRepoUrl}" /tmp/backend-repo
+              echo "Clonando repositorio Git: ${BackendRepoUrl} (rama ${BackendRepoBranch})..."
+              git clone -b "${BackendRepoBranch}" "${BackendRepoUrl}" /tmp/backend-repo
               cp -a /tmp/backend-repo/. /opt/asistencia-backend/
               rm -rf /tmp/backend-repo
               chown -R ${AdminUsername}:${AdminUsername} /opt/asistencia-backend

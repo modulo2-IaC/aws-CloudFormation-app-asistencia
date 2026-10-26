@@ -14,8 +14,8 @@ graph TD
         Users["👥 Usuarios Web (Navegador)"]
         Admin["💻 Administrador (DevOps / SSH / SSM)"]
         NeonDB[("🐘 PostgreSQL Neon DB (Externo Cloud)\nPuerto 5432 con SSL")]
-        GitBack["🐙 Repositorio Git Backend\nasistencia-back.git"]
-        GitFront["🐙 Repositorio Git Frontend\nasistencia-front.git"]
+        GitBack["🐙 Repositorio Git Backend\napp-asistencia-backend.git (rama dev)"]
+        GitFront["🐙 Repositorio Git Frontend\napp-asistencia-frontend.git (rama dev)"]
     end
 
     subgraph AWS_Cloud["☁️ AWS Cloud — Region us-east-2"]
@@ -255,7 +255,7 @@ sequenceDiagram
         OS->>OS: Instala PM2 globalmente
         OS->>OS: Configura ecosystem.config.js (con reinicio por memoria >450MB)
         OS->>OS: Escribe archivo .env con DatabaseUrl y JwtSecret
-        OS->>Git: Clona repositorio asistencia-back (si se especifico URL)
+        OS->>Git: Clona repositorio app-asistencia-backend (rama dev)
         OS->>OS: Ejecuta npm install y prisma generate / migrate
         OS->>OS: Compila TypeScript (npm run build)
         OS->>App: Arranca servicio con PM2 y registra servicio systemd
@@ -264,7 +264,7 @@ sequenceDiagram
         OS->>OS: Configura virtual host para SPA con fallback a index.html
         OS->>OS: Genera .env con VITE_API_URL enlazado a la IP del Backend
         OS->>OS: Crea pagina de espera HTML temporal si no hay codigo aun
-        OS->>Git: Clona repositorio asistencia-front (si se especifico URL)
+        OS->>Git: Clona repositorio app-asistencia-frontend (rama dev)
         OS->>OS: Ejecuta npm install y npm run build (Vite)
         OS->>App: Recarga Nginx con los estáticos generados en /dist
     end

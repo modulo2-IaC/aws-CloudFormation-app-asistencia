@@ -126,14 +126,16 @@ jobs:
             {"ParameterKey": "AppTimezone", "ParameterValue": "${{ vars.APP_TIMEZONE || 'America/Caracas' }}"},
             {"ParameterKey": "RunMigrations", "ParameterValue": "${{ vars.RUN_MIGRATIONS || 'true' }}"},
             {"ParameterKey": "NodeVersion", "ParameterValue": "20"},
-            {"ParameterKey": "BackendRepoUrl", "ParameterValue": "${{ vars.BACKEND_REPO_URL || 'https://github.com/Joandrr/asistencia-back.git' }}"}
+            {"ParameterKey": "BackendRepoUrl", "ParameterValue": "${{ vars.BACKEND_REPO_URL || 'https://github.com/modulo2-IaC/app-asistencia-backend.git' }}"},
+            {"ParameterKey": "BackendRepoBranch", "ParameterValue": "${{ vars.BACKEND_REPO_BRANCH || 'dev' }}"}
           ]
           EOF
 
           # 3. Parametros de Frontend
           cat << EOF > parametros/frontend.json
           [
-            {"ParameterKey": "FrontendRepoUrl", "ParameterValue": "${{ vars.FRONTEND_REPO_URL || 'https://github.com/Joandrr/asistencia-front.git' }}"}
+            {"ParameterKey": "FrontendRepoUrl", "ParameterValue": "${{ vars.FRONTEND_REPO_URL || 'https://github.com/modulo2-IaC/app-asistencia-frontend.git' }}"},
+            {"ParameterKey": "FrontendRepoBranch", "ParameterValue": "${{ vars.FRONTEND_REPO_BRANCH || 'dev' }}"}
           ]
           EOF
 

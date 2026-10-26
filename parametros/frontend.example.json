@@ -1,6 +1,10 @@
-﻿[
+[
   {
     "ParameterKey": "FrontendRepoUrl",
-    "ParameterValue": "https://github.com/tu-usuario/asistencia-front.git"
+    "ParameterValue": "https://github.com/modulo2-IaC/app-asistencia-frontend.git"
+  },
+  {
+    "ParameterKey": "FrontendRepoBranch",
+    "ParameterValue": "dev"
   }
 ]

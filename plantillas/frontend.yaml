@@ -67,8 +67,13 @@ Parameters:
 
   FrontendRepoUrl:
     Type: String
-    Default: "https://github.com/Joandrr/asistencia-front.git"
+    Default: "https://github.com/modulo2-IaC/app-asistencia-frontend.git"
     Description: URL del repositorio Git del frontend.
+
+  FrontendRepoBranch:
+    Type: String
+    Default: "dev"
+    Description: Rama Git del repositorio Frontend a clonar y desplegar.
 
   NodeVersion:
     Type: String
@@ -318,8 +323,9 @@ Resources:
             cd /var/www/asistencia-front
 
             if [ -d .git ]; then
-              echo "[1/4] Actualizando codigo desde repositorio Git..."
-              git pull origin main || git pull
+              echo "[1/4] Actualizando codigo desde repositorio Git (rama ${FrontendRepoBranch})..."
+              git checkout ${FrontendRepoBranch} || true
+              git pull origin ${FrontendRepoBranch} || git pull
             fi
 
             if [ ! -f package.json ]; then
@@ -349,8 +355,8 @@ Resources:
             # -----------------------------------------------------------------
             echo "[8/8] Verificando repositorio Git inicial..."
             if [ -n "${FrontendRepoUrl}" ]; then
-              echo "Clonando repositorio Git: ${FrontendRepoUrl}..."
-              git clone "${FrontendRepoUrl}" /tmp/frontend-repo
+              echo "Clonando repositorio Git: ${FrontendRepoUrl} (rama ${FrontendRepoBranch})..."
+              git clone -b "${FrontendRepoBranch}" "${FrontendRepoUrl}" /tmp/frontend-repo
               cp -a /tmp/frontend-repo/. /var/www/asistencia-front/
               rm -rf /tmp/frontend-repo
               chown -R ${AdminUsername}:${AdminUsername} /var/www/asistencia-front

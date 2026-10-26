@@ -33,10 +33,12 @@ Metadata:
           - RunMigrations
           - NodeVersion
           - BackendRepoUrl
+          - BackendRepoBranch
       - Label:
           default: "4. Parametros de Aplicacion Frontend (Vite/React)"
         Parameters:
           - FrontendRepoUrl
+          - FrontendRepoBranch
       - Label:
           default: "5. Observabilidad, Monitoreo y Alertas"
         Parameters:
@@ -133,13 +135,23 @@ Parameters:
 
   BackendRepoUrl:
     Type: String
-    Default: "https://github.com/Joandrr/asistencia-back.git"
+    Default: "https://github.com/modulo2-IaC/app-asistencia-backend.git"
     Description: URL del repositorio Git del backend.
+
+  BackendRepoBranch:
+    Type: String
+    Default: "dev"
+    Description: Rama Git del repositorio Backend a clonar y desplegar.
 
   FrontendRepoUrl:
     Type: String
-    Default: "https://github.com/Joandrr/asistencia-front.git"
+    Default: "https://github.com/modulo2-IaC/app-asistencia-frontend.git"
     Description: URL del repositorio Git del frontend.
+
+  FrontendRepoBranch:
+    Type: String
+    Default: "dev"
+    Description: Rama Git del repositorio Frontend a clonar y desplegar.
 
   AlertEmail:
     Type: String
@@ -200,6 +212,7 @@ Resources:
         RunMigrations: !Ref RunMigrations
         NodeVersion: !Ref NodeVersion
         BackendRepoUrl: !Ref BackendRepoUrl
+        BackendRepoBranch: !Ref BackendRepoBranch
 
   # ---------------------------------------------------------------------------
   # 4. Modulo de Computo Frontend: EC2 React/Vite, EIP, Nginx
@@ -220,6 +233,7 @@ Resources:
         SecurityGroupId: !GetAtt SeguridadStack.Outputs.FrontendSecurityGroupId
         IamInstanceProfile: !GetAtt SeguridadStack.Outputs.FrontendInstanceProfileName
         FrontendRepoUrl: !Ref FrontendRepoUrl
+        FrontendRepoBranch: !Ref FrontendRepoBranch
         NodeVersion: !Ref NodeVersion
         BackendPublicIP: !GetAtt BackendStack.Outputs.BackendPublicIP
 

@@ -1,4 +1,4 @@
-﻿[
+[
   {
     "ParameterKey": "DatabaseUrl",
     "ParameterValue": "postgresql://usuario:password@tu-host.us-east-2.aws.neon.tech/dbname?sslmode=require"
@@ -25,6 +25,10 @@
   },
   {
     "ParameterKey": "BackendRepoUrl",
-    "ParameterValue": "https://github.com/tu-usuario/asistencia-backend.git"
+    "ParameterValue": "https://github.com/modulo2-IaC/app-asistencia-backend.git"
+  },
+  {
+    "ParameterKey": "BackendRepoBranch",
+    "ParameterValue": "dev"
   }
 ]
