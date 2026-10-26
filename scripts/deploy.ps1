@@ -192,12 +192,77 @@ Remove-Item $PackagedFile -ErrorAction SilentlyContinue
 
 if ($deployExit -eq 0) {
     Write-Host "`n============================================================" -ForegroundColor Green
-    Write-Host "  Despliegue completado con exito!" -ForegroundColor Green
+    Write-Host "  ¡DESPLIEGUE COMPLETADO CON EXITO EN AWS!" -ForegroundColor Green
     Write-Host "============================================================" -ForegroundColor Green
-    aws cloudformation describe-stacks `
-        --stack-name "$StackName" --region "$Region" `
-        --query "Stacks[0].Outputs[*].[OutputKey,OutputValue]" `
-        --output table
+
+    $stackJson = (aws cloudformation describe-stacks --stack-name "$StackName" --region "$Region" --output json | ConvertFrom-Json)
+    $outputs = $stackJson.Stacks[0].Outputs
+
+    $outMap = @{}
+    foreach ($item in $outputs) {
+        $outMap[$item.OutputKey] = $item.OutputValue
+    }
+
+    Write-Host "`n>> ENDPOINTS PUBLICOS:" -ForegroundColor Cyan
+    Write-Host "------------------------------------------------------------" -ForegroundColor DarkGray
+    if ($outMap["FrontendWebUrl"]) {
+        Write-Host "  [Frontend Web] : " -NoNewline -ForegroundColor White
+        Write-Host $outMap["FrontendWebUrl"] -ForegroundColor Green
+    }
+    if ($outMap["BackendApiUrl"]) {
+        Write-Host "  [Backend API]  : " -NoNewline -ForegroundColor White
+        Write-Host $outMap["BackendApiUrl"] -ForegroundColor Green
+    }
+    if ($outMap["BackendDocsUrl"]) {
+        Write-Host "  [Swagger Docs] : " -NoNewline -ForegroundColor White
+        Write-Host $outMap["BackendDocsUrl"] -ForegroundColor Green
+    }
+
+    Write-Host "`n>> INFRAESTRUCTURA Y SERVIDORES EC2:" -ForegroundColor Cyan
+    Write-Host "------------------------------------------------------------" -ForegroundColor DarkGray
+    if ($outMap["FrontendPublicIP"]) {
+        Write-Host "  Frontend Elastic IP : " -NoNewline -ForegroundColor White
+        Write-Host $outMap["FrontendPublicIP"] -ForegroundColor Yellow
+    }
+    if ($outMap["FrontendInstanceId"]) {
+        Write-Host "  Frontend Instancia  : " -NoNewline -ForegroundColor White
+        Write-Host $outMap["FrontendInstanceId"] -ForegroundColor Yellow
+    }
+    if ($outMap["BackendPublicIP"]) {
+        Write-Host "  Backend Elastic IP  : " -NoNewline -ForegroundColor White
+        Write-Host $outMap["BackendPublicIP"] -ForegroundColor Yellow
+    }
+    if ($outMap["BackendInstanceId"]) {
+        Write-Host "  Backend Instancia   : " -NoNewline -ForegroundColor White
+        Write-Host $outMap["BackendInstanceId"] -ForegroundColor Yellow
+    }
+    if ($outMap["VpcId"]) {
+        Write-Host "  VPC Red ID          : " -NoNewline -ForegroundColor White
+        Write-Host $outMap["VpcId"] -ForegroundColor Yellow
+    }
+
+    Write-Host "`n>> COMANDOS DE ACCESO (SSH Y AWS SSM):" -ForegroundColor Cyan
+    Write-Host "------------------------------------------------------------" -ForegroundColor DarkGray
+    if ($outMap["SSHFrontendCommand"]) {
+        Write-Host "  SSH Frontend : " -NoNewline -ForegroundColor White
+        Write-Host $outMap["SSHFrontendCommand"] -ForegroundColor Magenta
+    }
+    if ($outMap["SSHBackendCommand"]) {
+        Write-Host "  SSH Backend  : " -NoNewline -ForegroundColor White
+        Write-Host $outMap["SSHBackendCommand"] -ForegroundColor Magenta
+    }
+    if ($outMap["SSMFrontendSessionCommand"]) {
+        Write-Host "  SSM Frontend : " -NoNewline -ForegroundColor White
+        Write-Host $outMap["SSMFrontendSessionCommand"] -ForegroundColor Magenta
+    }
+    if ($outMap["SSMBackendSessionCommand"]) {
+        Write-Host "  SSM Backend  : " -NoNewline -ForegroundColor White
+        Write-Host $outMap["SSMBackendSessionCommand"] -ForegroundColor Magenta
+    }
+
+    Write-Host "`n>> TODOS LOS OUTPUTS REGISTRADOS EN CLOUDFORMATION:" -ForegroundColor Cyan
+    Write-Host "------------------------------------------------------------" -ForegroundColor DarkGray
+    $outputs | Select-Object @{Name="Output Key"; Expression={$_.OutputKey}}, @{Name="Valor"; Expression={$_.OutputValue}} | Format-Table -AutoSize | Out-String | Write-Host -ForegroundColor Gray
 } else {
     Write-Host "`n[ERROR] Fallo el despliegue de '$StackName'." -ForegroundColor Red
     exit $deployExit
