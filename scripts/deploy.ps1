@@ -142,7 +142,7 @@ if (-not $S3Bucket) {
 # -----------------------------------------------------------------------------
 # 4. VERIFICACION DE ESTADO DEL STACK PREVIO (ROLLBACK_COMPLETE)
 # -----------------------------------------------------------------------------
-$stackStatus = (aws cloudformation describe-stacks --stack-name "$StackName" --region "$Region" --query "Stacks[0].StackStatus" --output text 2>$null)
+$stackStatus = (aws cloudformation list-stacks --region "$Region" --query "StackSummaries[?StackName=='$StackName' && StackStatus!='DELETE_COMPLETE'].StackStatus | [0]" --output text)
 if ($stackStatus -eq "ROLLBACK_COMPLETE") {
     Write-Host "`n[WARN] El stack '$StackName' esta en estado 'ROLLBACK_COMPLETE' (fallo de despliegue previo)." -ForegroundColor Yellow
     Write-Host "  Eliminando stack en rollback para permitir recreacion limpia..." -ForegroundColor Yellow

@@ -31,7 +31,7 @@ if (-not (Get-Command aws -ErrorAction SilentlyContinue)) {
 
 # 2. Verificar si el stack existe en la region
 Write-Host "`n[1/4] Verificando existencia del stack en AWS ($Region)..." -ForegroundColor Magenta
-$stackStatus = (aws cloudformation describe-stacks --stack-name "$StackName" --region "$Region" --query "Stacks[0].StackStatus" --output text 2>$null)
+$stackStatus = (aws cloudformation list-stacks --region "$Region" --query "StackSummaries[?StackName=='$StackName' && StackStatus!='DELETE_COMPLETE'].StackStatus | [0]" --output text)
 
 if (-not $stackStatus -or $stackStatus -eq "None") {
     Write-Host "  [INFO] El stack '$StackName' no existe en la region '$Region'. Nada que eliminar." -ForegroundColor Green
