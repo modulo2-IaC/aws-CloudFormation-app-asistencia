@@ -56,7 +56,8 @@ foreach ($f in @($infraFile, $backendFile, $frontFile)) {
 $merged = (Get-Content $infraFile   | ConvertFrom-Json) +
           (Get-Content $backendFile  | ConvertFrom-Json) +
           (Get-Content $frontFile    | ConvertFrom-Json)
-$merged | ConvertTo-Json | Set-Content -Encoding UTF8 $MergedFile
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($MergedFile, ($merged | ConvertTo-Json -Depth 10), $utf8NoBom)
 Write-Host "  [OK] $($merged.Count) parametros fusionados con exito." -ForegroundColor Green
 
 # -----------------------------------------------------------------------------
@@ -138,13 +139,14 @@ if (-not $S3Bucket) {
 # -----------------------------------------------------------------------------
 Write-Host "`nDesplegando '$StackName' en '$Region'..." -ForegroundColor Cyan
 
+$mergedUri = "file://" + $MergedFile.Replace('\', '/')
 $deployArgs = @(
     "cloudformation", "deploy",
     "--template-file", "$TemplateFile",
     "--stack-name", "$StackName",
     "--region", "$Region",
     "--capabilities", "CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND",
-    "--parameter-overrides", "file://$MergedFile"
+    "--parameter-overrides", "$mergedUri"
 )
 
 if ($S3Bucket) {
