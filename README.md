@@ -2,6 +2,8 @@
 
 Infraestructura como Codigo (IaC) en AWS diseñada bajo principios de **Alta Cohesion y Bajo Acoplamiento** para desplegar el **Backend NestJS** y **Frontend React/Vite/Nginx** en instancias EC2 optimizadas para la capa gratuita (Free Tier, region `us-east-2`).
 
+> 📊 **Guia Visual de Arquitectura:** Para consultar diagramas interactivos de red, topologias, grafos de dependencias entre modulos y matrices de recursos, revisa el nuevo documento dedicado [ARQUITECTURA.md](file:///d:/soe/modulos/DCID-V1E1%20-%2002%20I%20INFRAESTRUCTURA%20COMO%20C%C3%93DIGO%20%28IAC%29/apps/app4/IAC/aws/CloudFormation/recursos-app-asistencia/ARQUITECTURA.md).
+
 ---
 
 ## Estructura Modular del Proyecto
@@ -9,6 +11,7 @@ Infraestructura como Codigo (IaC) en AWS diseñada bajo principios de **Alta Coh
 ```
 recursos-app-asistencia/
 ├── README.md                            # Documentacion general del sistema
+├── ARQUITECTURA.md                      # Diagramas visuales, matrices de relacion y flujo de recursos
 ├── .gitignore                           # Proteccion contra exposicion de secretos/parametros
 ├── .github/
 │   └── workflows/
