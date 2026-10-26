@@ -1,0 +1,30 @@
+﻿[
+  {
+    "ParameterKey": "DatabaseUrl",
+    "ParameterValue": "postgresql://usuario:password@tu-host.us-east-2.aws.neon.tech/dbname?sslmode=require"
+  },
+  {
+    "ParameterKey": "JwtSecret",
+    "ParameterValue": "TU_JWT_SECRET_MINIMO_32_CARACTERES_ALEATORIOS"
+  },
+  {
+    "ParameterKey": "CorsOrigin",
+    "ParameterValue": "*"
+  },
+  {
+    "ParameterKey": "AppTimezone",
+    "ParameterValue": "America/La_Paz"
+  },
+  {
+    "ParameterKey": "RunMigrations",
+    "ParameterValue": "true"
+  },
+  {
+    "ParameterKey": "NodeVersion",
+    "ParameterValue": "20"
+  },
+  {
+    "ParameterKey": "BackendRepoUrl",
+    "ParameterValue": "https://github.com/tu-usuario/asistencia-backend.git"
+  }
+]

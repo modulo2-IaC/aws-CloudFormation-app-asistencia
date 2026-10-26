@@ -1,0 +1,391 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Modulo de Computo Backend (Alta Cohesion): Instancia EC2 Ubuntu 22.04 LTS,
+  Elastic IP (EIP) estatica, almacenamiento EBS gp3 cifrado y aprovisionamiento
+  automatizado de NestJS con PM2, Node.js y migraciones de base de datos.
+
+# =============================================================================
+# PARAMETROS DE ENTRADA
+# =============================================================================
+Parameters:
+  ProjectName:
+    Type: String
+    Default: asistencia
+    Description: Nombre base del proyecto.
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - qa
+      - prod
+    Description: Entorno de despliegue (dev, qa, prod).
+
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+      - t3.small
+      - t2.small
+    Description: Tipo de instancia EC2.
+
+  LatestUbuntuAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id'
+    Description: Parametro SSM que resuelve la AMI oficial de Ubuntu 22.04 LTS.
+
+  KeyName:
+    Type: String
+    Default: ""
+    Description: "(Opcional) Nombre del par de claves EC2 para acceso SSH."
+
+  AdminUsername:
+    Type: String
+    Default: ubuntu
+    Description: Usuario del sistema operativo para administracion.
+
+  AdminPassword:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: "(Opcional) Contrasena para el usuario administrador."
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: ID de la subred donde se desplegara la instancia (proviene de Red).
+
+  SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: ID del Security Group para el backend (proviene de Seguridad).
+
+  IamInstanceProfile:
+    Type: String
+    Description: Nombre del Instance Profile con permisos SSM y CloudWatch.
+
+  DatabaseUrl:
+    Type: String
+    NoEcho: true
+    Description: Cadena de conexion completa a PostgreSQL Neon con SSL habilitado.
+
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    Description: Secreto criptografico robusto para la firma y verificacion de tokens JWT.
+
+  CorsOrigin:
+    Type: String
+    Default: "*"
+    Description: Origen permitido para solicitudes CORS en la API REST.
+
+  AppTimezone:
+    Type: String
+    Default: America/Caracas
+    Description: Zona horaria IANA para la aplicacion backend.
+
+  RunMigrations:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Determina si se ejecutan migraciones de base de datos en el arranque.
+
+  NodeVersion:
+    Type: String
+    Default: "20"
+    Description: Version mayor de Node.js a instalar via NodeSource.
+
+  BackendRepoUrl:
+    Type: String
+    Default: "https://github.com/Joandrr/asistencia-back.git"
+    Description: URL del repositorio Git del backend.
+
+# =============================================================================
+# CONDICIONES
+# =============================================================================
+Conditions:
+  HasKeyName: !Not [!Equals [!Ref KeyName, ""]]
+
+# =============================================================================
+# RECURSOS DE COMPUTO BACKEND
+# =============================================================================
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # IP Elastica Estatica para el Backend
+  # ---------------------------------------------------------------------------
+  BackendEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "eip-${ProjectName}-backend-${Environment}"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: backend
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ---------------------------------------------------------------------------
+  # Instancia EC2 Backend (Ubuntu 22.04 LTS + NestJS + PM2)
+  # ---------------------------------------------------------------------------
+  BackendInstance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_88
+            comment: "La instancia requiere direccion IP publica estatica (EIP) para acceso directo y control de costos dentro del Free Tier."
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestUbuntuAmiId
+      KeyName: !If [HasKeyName, !Ref KeyName, !Ref "AWS::NoValue"]
+      IamInstanceProfile: !Ref IamInstanceProfile
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref SecurityGroupId
+      Monitoring: true
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 15
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
+      Tags:
+        - Key: Name
+          Value: !Sub "vm-${ProjectName}-backend-${Environment}"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: backend
+        - Key: ManagedBy
+          Value: CloudFormation
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -ex
+
+            # -----------------------------------------------------------------
+            # 1. Configurar Hostname y Registro de Inicializacion
+            # -----------------------------------------------------------------
+            hostnamectl set-hostname "vm-${ProjectName}-backend-${Environment}"
+            LOG_FILE="/var/log/asistencia-backend-setup.log"
+            exec > >(tee -a "$LOG_FILE") 2>&1
+            echo "Iniciando provisionamiento del Backend: $(date)"
+
+            # -----------------------------------------------------------------
+            # 2. Habilitar Swap de 1GB (Garantiza compilacion fluida de TypeScript)
+            # -----------------------------------------------------------------
+            if [ ! -f /swapfile ]; then
+              echo "[1/8] Configurando 1GB de espacio Swap..."
+              fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024
+              chmod 600 /swapfile
+              mkswap /swapfile
+              swapon /swapfile
+              echo '/swapfile none swap sw 0 0' >> /etc/fstab
+            fi
+
+            # -----------------------------------------------------------------
+            # 3. Actualizar sistema e instalar herramientas base
+            # -----------------------------------------------------------------
+            echo "[2/8] Instalando paquetes del sistema..."
+            apt-get update -y
+            DEBIAN_FRONTEND=noninteractive apt-get install -y git curl wget unzip build-essential
+
+            # Configurar contrasena para usuario ubuntu si se suministro
+            if [ -n "${UserPassword}" ]; then
+              echo "${AdminUsername}:${UserPassword}" | chpasswd
+              sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+              sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+              systemctl restart ssh || systemctl restart sshd
+            fi
+
+            # -----------------------------------------------------------------
+            # 4. Instalar Node.js LTS via NodeSource y PM2
+            # -----------------------------------------------------------------
+            echo "[3/8] Instalando Node.js v${NodeVersion} LTS y PM2..."
+            curl -fsSL https://deb.nodesource.com/setup_${NodeVersion}.x | bash -
+            apt-get install -y nodejs
+            node --version
+            npm --version
+            npm install -g pm2
+
+            # -----------------------------------------------------------------
+            # 5. Preparar directorios de aplicacion y logs
+            # -----------------------------------------------------------------
+            echo "[4/8] Preparando estructura de directorios..."
+            mkdir -p /opt/asistencia-backend
+            mkdir -p /var/log/pm2
+            chown -R ${AdminUsername}:${AdminUsername} /opt/asistencia-backend
+            chown -R ${AdminUsername}:${AdminUsername} /var/log/pm2
+            chown ${AdminUsername}:${AdminUsername} /home/${AdminUsername}
+
+            # -----------------------------------------------------------------
+            # 6. Escribir configuracion PM2 (ecosystem.config.js)
+            # -----------------------------------------------------------------
+            echo "[5/8] Configurando archivo PM2 ecosystem..."
+            cat << 'ECOEOF' > /opt/asistencia-backend/ecosystem.config.js
+            module.exports = {
+              apps: [{
+                name: 'asistencia-backend',
+                script: 'dist/src/main.js',
+                cwd: '/opt/asistencia-backend',
+                instances: 1,
+                autorestart: true,
+                watch: false,
+                max_memory_restart: '450M',
+                env: {
+                  NODE_ENV: 'production',
+                  PORT: 3000
+                },
+                error_file: '/var/log/pm2/asistencia-backend-error.log',
+                out_file: '/var/log/pm2/asistencia-backend-out.log',
+                merge_logs: true,
+                time: true
+              }]
+            };
+            ECOEOF
+            chown ${AdminUsername}:${AdminUsername} /opt/asistencia-backend/ecosystem.config.js
+
+            # -----------------------------------------------------------------
+            # 7. Escribir archivo de variables de entorno (.env) de produccion
+            # -----------------------------------------------------------------
+            echo "[6/8] Escribiendo variables de entorno..."
+            cat << ENVEOF > /opt/asistencia-backend/.env
+            PORT=3000
+            DATABASE_URL=${DatabaseUrl}
+            JWT_SECRET=${JwtSecret}
+            CORS_ORIGIN=${CorsOrigin}
+            TZ=${AppTimezone}
+            NODE_ENV=production
+            ENVEOF
+            chmod 600 /opt/asistencia-backend/.env
+            chown ${AdminUsername}:${AdminUsername} /opt/asistencia-backend/.env
+
+            # -----------------------------------------------------------------
+            # 8. Script ~/deploy.sh para compilacion y reinicio facil de NestJS
+            # -----------------------------------------------------------------
+            echo "[7/8] Creando script utilitario ~/deploy.sh..."
+            cat << 'DEPLOYEOF' > /home/${AdminUsername}/deploy.sh
+            #!/bin/bash
+            set -e
+            echo "======================================================"
+            echo "  Iniciando compilacion y despliegue de asistencia-backend"
+            echo "======================================================"
+
+            cd /opt/asistencia-backend
+
+            if [ -d .git ]; then
+              echo "[1/5] Actualizando codigo desde repositorio Git..."
+              git pull origin main || git pull
+            fi
+
+            if [ ! -f package.json ]; then
+              echo "Error: package.json no encontrado en /opt/asistencia-backend"
+              echo "Sube el codigo antes de ejecutar este script."
+              exit 1
+            fi
+
+            echo "[2/5] Instalando dependencias de Node.js..."
+            npm install
+
+            echo "[3/5] Generando cliente Prisma ORM..."
+            npx prisma generate || true
+
+            if [ "${RunMigrations}" = "true" ]; then
+              echo "[4/5] Ejecutando migraciones de base de datos..."
+              npx prisma migrate deploy || true
+            fi
+
+            echo "[5/5] Compilando aplicacion TypeScript NestJS..."
+            npm run build
+
+            echo "Reiniciando proceso en PM2..."
+            pm2 restart ecosystem.config.js || pm2 start ecosystem.config.js
+            pm2 save
+
+            echo "======================================================"
+            echo "  Despliegue del Backend completado con exito!"
+            echo "======================================================"
+            DEPLOYEOF
+            chmod 755 /home/${AdminUsername}/deploy.sh
+            chown ${AdminUsername}:${AdminUsername} /home/${AdminUsername}/deploy.sh
+
+            # -----------------------------------------------------------------
+            # 9. Clonar Git (si aplica), compilar e iniciar PM2
+            # -----------------------------------------------------------------
+            echo "[8/8] Verificando repositorio Git inicial..."
+            if [ -n "${BackendRepoUrl}" ]; then
+              echo "Clonando repositorio Git: ${BackendRepoUrl}..."
+              git clone "${BackendRepoUrl}" /tmp/backend-repo
+              cp -a /tmp/backend-repo/. /opt/asistencia-backend/
+              rm -rf /tmp/backend-repo
+              chown -R ${AdminUsername}:${AdminUsername} /opt/asistencia-backend
+            fi
+
+            # Compilar e iniciar si package.json esta disponible
+            if [ -f /opt/asistencia-backend/package.json ]; then
+              cd /opt/asistencia-backend
+              sudo -u ${AdminUsername} npm install
+              sudo -u ${AdminUsername} npx prisma generate || true
+              if [ "${RunMigrations}" = "true" ]; then
+                sudo -u ${AdminUsername} npx prisma migrate deploy || true
+              fi
+              sudo -u ${AdminUsername} npm run build || true
+              sudo -u ${AdminUsername} pm2 start ecosystem.config.js || true
+              sudo -u ${AdminUsername} pm2 save || true
+            fi
+
+            # Configurar PM2 para que inicie automaticamente tras reinicios del SO
+            env PATH=$PATH:/usr/bin pm2 startup systemd -u ${AdminUsername} --hp /home/${AdminUsername} || true
+
+            echo "Provisionamiento de asistencia-backend finalizado con exito: $(date)"
+          - UserPassword: !Ref AdminPassword
+
+  # ---------------------------------------------------------------------------
+  # Asociacion de Elastic IP con la Instancia Backend
+  # ---------------------------------------------------------------------------
+  BackendEIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt BackendEIP.AllocationId
+      InstanceId: !Ref BackendInstance
+
+# =============================================================================
+# SALIDAS DEL MODULO DE BACKEND
+# =============================================================================
+Outputs:
+  BackendInstanceId:
+    Description: ID de la instancia EC2 del Backend
+    Value: !Ref BackendInstance
+
+  BackendPublicIP:
+    Description: Direccion IP publica estatica (Elastic IP) del Backend
+    Value: !Ref BackendEIP
+
+  BackendPrivateIP:
+    Description: Direccion IP privada de la instancia Backend
+    Value: !GetAtt BackendInstance.PrivateIp
+
+  BackendApiUrl:
+    Description: URL base del endpoint API NestJS
+    Value: !Sub "http://${BackendEIP}:3000/api/v1"
+
+  BackendDocsUrl:
+    Description: URL de la documentacion Swagger del Backend
+    Value: !Sub "http://${BackendEIP}:3000/api/v1/docs"

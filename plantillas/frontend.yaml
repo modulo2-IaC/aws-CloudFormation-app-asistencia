@@ -1,0 +1,397 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Modulo de Computo Frontend (Alta Cohesion): Instancia EC2 Ubuntu 22.04 LTS,
+  Elastic IP (EIP) estatica, Nginx optimizado para SPA (React/Vite),
+  y script de despliegue automatizado.
+
+# =============================================================================
+# PARAMETROS DE ENTRADA
+# =============================================================================
+Parameters:
+  ProjectName:
+    Type: String
+    Default: asistencia
+    Description: Nombre base del proyecto.
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - qa
+      - prod
+    Description: Entorno de despliegue (dev, qa, prod).
+
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+      - t3.small
+      - t2.small
+    Description: Tipo de instancia EC2.
+
+  LatestUbuntuAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id'
+    Description: Parametro SSM que resuelve la AMI oficial de Ubuntu 22.04 LTS.
+
+  KeyName:
+    Type: String
+    Default: ""
+    Description: "(Opcional) Nombre del par de claves EC2 para acceso SSH."
+
+  AdminUsername:
+    Type: String
+    Default: ubuntu
+    Description: Usuario del sistema operativo para administracion.
+
+  AdminPassword:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: "(Opcional) Contrasena para el usuario administrador."
+
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: ID de la subred donde se desplegara la instancia (proviene de Red).
+
+  SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: ID del Security Group para el frontend (proviene de Seguridad).
+
+  IamInstanceProfile:
+    Type: String
+    Description: Nombre del Instance Profile con permisos SSM y CloudWatch.
+
+  FrontendRepoUrl:
+    Type: String
+    Default: "https://github.com/Joandrr/asistencia-front.git"
+    Description: URL del repositorio Git del frontend.
+
+  NodeVersion:
+    Type: String
+    Default: "20"
+    Description: Version mayor de Node.js a instalar via NodeSource.
+
+  BackendPublicIP:
+    Type: String
+    Description: Direccion IP publica del Backend para enlazar VITE_API_URL en el frontend (proviene de Backend).
+
+# =============================================================================
+# CONDICIONES
+# =============================================================================
+Conditions:
+  HasKeyName: !Not [!Equals [!Ref KeyName, ""]]
+
+# =============================================================================
+# RECURSOS DE COMPUTO FRONTEND
+# =============================================================================
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # IP Elastica Estatica para el Frontend
+  # ---------------------------------------------------------------------------
+  FrontendEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "eip-${ProjectName}-frontend-${Environment}"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: frontend
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ---------------------------------------------------------------------------
+  # Instancia EC2 Frontend (Ubuntu 22.04 LTS + Nginx + React/Vite)
+  # ---------------------------------------------------------------------------
+  FrontendInstance:
+    Type: AWS::EC2::Instance
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_88
+            comment: "La instancia requiere direccion IP publica estatica (EIP) para servir la aplicacion web a internet."
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref LatestUbuntuAmiId
+      KeyName: !If [HasKeyName, !Ref KeyName, !Ref "AWS::NoValue"]
+      IamInstanceProfile: !Ref IamInstanceProfile
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref SecurityGroupId
+      Monitoring: true
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 15
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
+      Tags:
+        - Key: Name
+          Value: !Sub "vm-${ProjectName}-frontend-${Environment}"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: frontend
+        - Key: ManagedBy
+          Value: CloudFormation
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -ex
+
+            # -----------------------------------------------------------------
+            # 1. Configurar Hostname y Registro de Inicializacion
+            # -----------------------------------------------------------------
+            hostnamectl set-hostname "vm-${ProjectName}-frontend-${Environment}"
+            LOG_FILE="/var/log/asistencia-front-setup.log"
+            exec > >(tee -a "$LOG_FILE") 2>&1
+            echo "Iniciando provisionamiento del Frontend: $(date)"
+
+            # -----------------------------------------------------------------
+            # 2. Habilitar Swap de 1GB (Garantiza compilacion fluida de Vite)
+            # -----------------------------------------------------------------
+            if [ ! -f /swapfile ]; then
+              echo "[1/8] Configurando 1GB de espacio Swap..."
+              fallocate -l 1G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=1024
+              chmod 600 /swapfile
+              mkswap /swapfile
+              swapon /swapfile
+              echo '/swapfile none swap sw 0 0' >> /etc/fstab
+            fi
+
+            # -----------------------------------------------------------------
+            # 3. Actualizar sistema e instalar Nginx y herramientas
+            # -----------------------------------------------------------------
+            echo "[2/8] Instalando Nginx y utilitarios..."
+            apt-get update -y
+            DEBIAN_FRONTEND=noninteractive apt-get install -y git curl wget unzip build-essential nginx
+
+            if [ -n "${UserPassword}" ]; then
+              echo "${AdminUsername}:${UserPassword}" | chpasswd
+              sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+              sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+              systemctl restart ssh || systemctl restart sshd
+            fi
+
+            # -----------------------------------------------------------------
+            # 4. Instalar Node.js LTS via NodeSource
+            # -----------------------------------------------------------------
+            echo "[3/8] Instalando Node.js v${NodeVersion} LTS..."
+            curl -fsSL https://deb.nodesource.com/setup_${NodeVersion}.x | bash -
+            apt-get install -y nodejs
+            node --version
+            npm --version
+
+            # -----------------------------------------------------------------
+            # 5. Configurar Nginx para Single Page Application (SPA / React)
+            # -----------------------------------------------------------------
+            echo "[4/8] Configurando Nginx para SPA (React / TanStack Router)..."
+            cat << 'NGINXEOF' > /etc/nginx/sites-available/asistencia-front
+            server {
+                listen 80 default_server;
+                listen [::]:80 default_server;
+
+                root /var/www/asistencia-front/dist;
+                index index.html;
+
+                server_name _;
+
+                # Soporte para SPA: redirige rutas al index.html
+                location / {
+                    try_files $uri $uri/ /index.html;
+                }
+
+                # Cache optimizada para assets generados por Vite (js, css, fuentes)
+                location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+                    expires 1y;
+                    add_header Cache-Control "public, immutable";
+                    try_files $uri =404;
+                }
+
+                # Compresion Gzip para alto rendimiento en red
+                gzip on;
+                gzip_vary on;
+                gzip_min_length 1024;
+                gzip_proxied expired no-cache no-store private auth;
+                gzip_types text/plain text/css text/xml text/javascript application/x-javascript application/xml application/javascript application/json image/svg+xml;
+                gzip_disable "MSIE [1-6]\.";
+            }
+            NGINXEOF
+
+            # Habilitar sitio Nginx
+            rm -f /etc/nginx/sites-enabled/default
+            ln -sf /etc/nginx/sites-available/asistencia-front /etc/nginx/sites-enabled/
+            nginx -t
+            systemctl restart nginx
+            systemctl enable nginx
+
+            # Permitir recarga sin contrasena de Nginx para el usuario administrador
+            cat << 'SUDOEOF' > /etc/sudoers.d/admin-nginx
+            ${AdminUsername} ALL=(ALL) NOPASSWD: /usr/bin/systemctl reload nginx, /usr/bin/systemctl restart nginx
+            SUDOEOF
+            chmod 440 /etc/sudoers.d/admin-nginx
+
+            # -----------------------------------------------------------------
+            # 6. Preparar estructura de directorios y pagina de espera temporal
+            # -----------------------------------------------------------------
+            echo "[5/8] Preparando directorios y pagina de inicio temporal..."
+            mkdir -p /var/www/asistencia-front/dist
+            chown -R ${AdminUsername}:${AdminUsername} /var/www/asistencia-front
+            chown ${AdminUsername}:${AdminUsername} /home/${AdminUsername}
+
+            cat << 'HTMLEOF' > /var/www/asistencia-front/dist/index.html
+            <!DOCTYPE html>
+            <html lang="es">
+            <head>
+              <meta charset="UTF-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+              <title>Sistema de Asistencia - Frontend en AWS</title>
+              <style>
+                * { box-sizing: border-box; margin: 0; padding: 0; }
+                body { font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
+                .card { background: #1e293b; border: 1px solid #334155; border-radius: 1rem; padding: 2.5rem; max-width: 580px; width: 100%; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); text-align: center; }
+                .icon { width: 56px; height: 56px; background: rgba(56, 189, 248, 0.15); border: 1px solid #38bdf8; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem; color: #38bdf8; font-size: 1.75rem; }
+                h1 { font-size: 1.6rem; color: #f1f5f9; margin-bottom: 0.75rem; font-weight: 700; }
+                p { color: #94a3b8; font-size: 0.95rem; line-height: 1.6; margin-bottom: 1.25rem; }
+                .badge { display: inline-block; background: #0284c7; color: #f0f9ff; font-size: 0.8rem; font-weight: 600; padding: 0.35rem 0.85rem; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1.5rem; }
+                .box { background: #0f172a; border-radius: 0.5rem; padding: 1rem; text-align: left; font-family: monospace; font-size: 0.85rem; color: #a5f3fc; border: 1px solid #334155; overflow-x: auto; line-height: 1.5; }
+              </style>
+            </head>
+            <body>
+              <div class="card">
+                <div class="icon">&#x2699;</div>
+                <span class="badge">Nginx Activo en AWS EC2</span>
+                <h1>Servidor Frontend Inicializado</h1>
+                <p>La infraestructura en AWS CloudFormation esta operativa. Sube el codigo fuente de <strong>asistencia-front</strong> o ejecuta el script de despliegue para publicar la aplicacion.</p>
+                <div class="box">
+                  # En tu maquina local:<br/>
+                  tar --exclude='node_modules' --exclude='.git' --exclude='dist' -czf frontend.tar.gz -C ../../../../asistencia-front .<br/>
+                  scp frontend.tar.gz ${AdminUsername}@&lt;IP_PUBLICA&gt;:/tmp/<br/><br/>
+                  # Conectate y compila:<br/>
+                  ssh ${AdminUsername}@&lt;IP_PUBLICA&gt;<br/>
+                  ~/deploy.sh
+                </div>
+              </div>
+            </body>
+            </html>
+            HTMLEOF
+            chown -R ${AdminUsername}:${AdminUsername} /var/www/asistencia-front/dist/index.html
+
+            # -----------------------------------------------------------------
+            # 7. Configurar variable de entorno VITE_API_URL enlazada al Backend
+            # -----------------------------------------------------------------
+            echo "[6/8] Configurando .env con enlace al Backend API..."
+            cat << ENVEOF > /var/www/asistencia-front/.env
+            VITE_API_URL=http://${BackendEipAddr}:3000/api/v1/
+            ENVEOF
+            chmod 644 /var/www/asistencia-front/.env
+            chown ${AdminUsername}:${AdminUsername} /var/www/asistencia-front/.env
+
+            # -----------------------------------------------------------------
+            # 8. Script ~/deploy.sh para compilacion y recarga de Nginx
+            # -----------------------------------------------------------------
+            echo "[7/8] Creando script ~/deploy.sh para el frontend..."
+            cat << 'DEPLOYEOF' > /home/${AdminUsername}/deploy.sh
+            #!/bin/bash
+            set -e
+            echo "======================================================"
+            echo "  Iniciando compilacion y despliegue de asistencia-front"
+            echo "======================================================"
+
+            cd /var/www/asistencia-front
+
+            if [ -d .git ]; then
+              echo "[1/4] Actualizando codigo desde repositorio Git..."
+              git pull origin main || git pull
+            fi
+
+            if [ ! -f package.json ]; then
+              echo "Error: package.json no encontrado en /var/www/asistencia-front"
+              echo "Sube el codigo antes de ejecutar este script."
+              exit 1
+            fi
+
+            echo "[2/4] Instalando dependencias de Node.js..."
+            npm install
+
+            echo "[3/4] Compilando aplicacion web con Vite..."
+            npm run build
+
+            echo "[4/4] Recargando servidor web Nginx..."
+            sudo systemctl reload nginx
+
+            echo "======================================================"
+            echo "  Despliegue del Frontend completado con exito!"
+            echo "======================================================"
+            DEPLOYEOF
+            chmod 755 /home/${AdminUsername}/deploy.sh
+            chown ${AdminUsername}:${AdminUsername} /home/${AdminUsername}/deploy.sh
+
+            # -----------------------------------------------------------------
+            # 9. Clonar Git (si aplica) y compilar
+            # -----------------------------------------------------------------
+            echo "[8/8] Verificando repositorio Git inicial..."
+            if [ -n "${FrontendRepoUrl}" ]; then
+              echo "Clonando repositorio Git: ${FrontendRepoUrl}..."
+              git clone "${FrontendRepoUrl}" /tmp/frontend-repo
+              cp -a /tmp/frontend-repo/. /var/www/asistencia-front/
+              rm -rf /tmp/frontend-repo
+              chown -R ${AdminUsername}:${AdminUsername} /var/www/asistencia-front
+            fi
+
+            if [ -f /var/www/asistencia-front/package.json ]; then
+              cd /var/www/asistencia-front
+              sudo -u ${AdminUsername} npm install
+              sudo -u ${AdminUsername} npm run build
+              systemctl reload nginx
+            fi
+
+            echo "Provisionamiento de asistencia-frontend finalizado con exito: $(date)"
+          - BackendEipAddr: !Ref BackendPublicIP
+            UserPassword: !Ref AdminPassword
+
+  # ---------------------------------------------------------------------------
+  # Asociacion de Elastic IP con la Instancia Frontend
+  # ---------------------------------------------------------------------------
+  FrontendEIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt FrontendEIP.AllocationId
+      InstanceId: !Ref FrontendInstance
+
+# =============================================================================
+# SALIDAS DEL MODULO DE FRONTEND
+# =============================================================================
+Outputs:
+  FrontendInstanceId:
+    Description: ID de la instancia EC2 del Frontend
+    Value: !Ref FrontendInstance
+
+  FrontendPublicIP:
+    Description: Direccion IP publica estatica (Elastic IP) del Frontend
+    Value: !Ref FrontendEIP
+
+  FrontendPrivateIP:
+    Description: Direccion IP privada de la instancia Frontend
+    Value: !GetAtt FrontendInstance.PrivateIp
+
+  FrontendWebUrl:
+    Description: URL HTTP de la aplicacion web Frontend en Nginx
+    Value: !Sub "http://${FrontendEIP}"

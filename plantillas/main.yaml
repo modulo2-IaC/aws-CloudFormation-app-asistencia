@@ -1,0 +1,311 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Orquestador Principal (Root Stack): Arquitectura Modular de Alta Cohesion y Bajo Acoplamiento.
+  Coordina los modulos anidados de Red, Seguridad, Backend NestJS, Frontend React/Nginx y Monitoreo.
+
+# =============================================================================
+# METADATOS Y GRUPOS DE PARAMETROS (AWS CloudFormation Interface)
+# =============================================================================
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "1. Configuracion General del Proyecto"
+        Parameters:
+          - ProjectName
+          - Environment
+      - Label:
+          default: "2. Computo y Acceso Administrativo (EC2)"
+        Parameters:
+          - InstanceType
+          - LatestUbuntuAmiId
+          - KeyName
+          - AdminUsername
+          - AdminPassword
+          - SSHLocation
+      - Label:
+          default: "3. Parametros de Aplicacion Backend (NestJS)"
+        Parameters:
+          - DatabaseUrl
+          - JwtSecret
+          - CorsOrigin
+          - AppTimezone
+          - RunMigrations
+          - NodeVersion
+          - BackendRepoUrl
+      - Label:
+          default: "4. Parametros de Aplicacion Frontend (Vite/React)"
+        Parameters:
+          - FrontendRepoUrl
+      - Label:
+          default: "5. Observabilidad, Monitoreo y Alertas"
+        Parameters:
+          - AlertEmail
+
+# =============================================================================
+# PARAMETROS DE ENTRADA
+# =============================================================================
+Parameters:
+  ProjectName:
+    Type: String
+    Default: asistencia
+    Description: Nombre base del proyecto utilizado para etiquetar y nombrar los recursos.
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - qa
+      - prod
+    Description: Entorno de despliegue (dev, qa, prod).
+
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+      - t3.small
+      - t2.small
+    Description: Tipo de instancia EC2. t2.micro y t3.micro son elegibles para Free Tier.
+
+  LatestUbuntuAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id'
+    Description: Parametro SSM que resuelve dinamicamente la AMI oficial de Ubuntu 22.04 LTS.
+
+  KeyName:
+    Type: String
+    Default: ""
+    Description: "(Opcional) Nombre del par de claves EC2 existente para autenticacion SSH."
+
+  AdminUsername:
+    Type: String
+    Default: ubuntu
+    Description: Usuario del sistema operativo para administracion.
+
+  AdminPassword:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: "(Opcional) Contrasena para el usuario administrador."
+
+  SSHLocation:
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+    ConstraintDescription: Debe ser un rango CIDR IP valido de la forma x.x.x.x/x (ej. tu-ip/32).
+    Description: Rango CIDR permitido para administracion SSH (Puerto 22).
+
+  DatabaseUrl:
+    Type: String
+    NoEcho: true
+    Description: Cadena de conexion completa a PostgreSQL Neon con SSL habilitado.
+
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    Description: Secreto criptografico robusto para la firma y verificacion de tokens JWT.
+
+  CorsOrigin:
+    Type: String
+    Default: "*"
+    Description: Origen permitido para solicitudes CORS en la API REST.
+
+  AppTimezone:
+    Type: String
+    Default: America/Caracas
+    Description: Zona horaria IANA para la aplicacion backend.
+
+  RunMigrations:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: Ejecutar migraciones de base de datos en el arranque del backend.
+
+  NodeVersion:
+    Type: String
+    Default: "20"
+    Description: Version mayor de Node.js a instalar en los servidores.
+
+  BackendRepoUrl:
+    Type: String
+    Default: "https://github.com/Joandrr/asistencia-back.git"
+    Description: URL del repositorio Git del backend.
+
+  FrontendRepoUrl:
+    Type: String
+    Default: "https://github.com/Joandrr/asistencia-front.git"
+    Description: URL del repositorio Git del frontend.
+
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: "(Opcional) Correo electronico para recibir notificaciones criticas via Amazon SNS."
+
+# =============================================================================
+# MODULOS ANIDADOS (ALTA COHESION Y BAJO ACOPLAMIENTO)
+# =============================================================================
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # 1. Modulo de Red: VPC, Subredes, Enrutamiento, Flow Logs
+  # ---------------------------------------------------------------------------
+  RedStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./red.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+
+  # ---------------------------------------------------------------------------
+  # 2. Modulo de Seguridad: Firewalls (Security Groups) y Roles IAM
+  # ---------------------------------------------------------------------------
+  SeguridadStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./seguridad.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+        VpcId: !GetAtt RedStack.Outputs.VpcId
+        SSHLocation: !Ref SSHLocation
+
+  # ---------------------------------------------------------------------------
+  # 3. Modulo de Computo Backend: EC2 NestJS, EIP, PM2
+  # ---------------------------------------------------------------------------
+  BackendStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./backend.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+        InstanceType: !Ref InstanceType
+        LatestUbuntuAmiId: !Ref LatestUbuntuAmiId
+        KeyName: !Ref KeyName
+        AdminUsername: !Ref AdminUsername
+        AdminPassword: !Ref AdminPassword
+        SubnetId: !GetAtt RedStack.Outputs.BackendSubnetId
+        SecurityGroupId: !GetAtt SeguridadStack.Outputs.BackendSecurityGroupId
+        IamInstanceProfile: !GetAtt SeguridadStack.Outputs.BackendInstanceProfileName
+        DatabaseUrl: !Ref DatabaseUrl
+        JwtSecret: !Ref JwtSecret
+        CorsOrigin: !Ref CorsOrigin
+        AppTimezone: !Ref AppTimezone
+        RunMigrations: !Ref RunMigrations
+        NodeVersion: !Ref NodeVersion
+        BackendRepoUrl: !Ref BackendRepoUrl
+
+  # ---------------------------------------------------------------------------
+  # 4. Modulo de Computo Frontend: EC2 React/Vite, EIP, Nginx
+  # ---------------------------------------------------------------------------
+  FrontendStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./frontend.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+        InstanceType: !Ref InstanceType
+        LatestUbuntuAmiId: !Ref LatestUbuntuAmiId
+        KeyName: !Ref KeyName
+        AdminUsername: !Ref AdminUsername
+        AdminPassword: !Ref AdminPassword
+        SubnetId: !GetAtt RedStack.Outputs.FrontendSubnetId
+        SecurityGroupId: !GetAtt SeguridadStack.Outputs.FrontendSecurityGroupId
+        IamInstanceProfile: !GetAtt SeguridadStack.Outputs.FrontendInstanceProfileName
+        FrontendRepoUrl: !Ref FrontendRepoUrl
+        NodeVersion: !Ref NodeVersion
+        BackendPublicIP: !GetAtt BackendStack.Outputs.BackendPublicIP
+
+  # ---------------------------------------------------------------------------
+  # 5. Modulo de Observabilidad: Alarmas CloudWatch, SNS, Log Groups
+  # ---------------------------------------------------------------------------
+  MonitoreoStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./monitoreo.yaml
+      Parameters:
+        ProjectName: !Ref ProjectName
+        Environment: !Ref Environment
+        AlertEmail: !Ref AlertEmail
+        BackendInstanceId: !GetAtt BackendStack.Outputs.BackendInstanceId
+        FrontendInstanceId: !GetAtt FrontendStack.Outputs.FrontendInstanceId
+
+# =============================================================================
+# OUTPUTS CONSOLIDADOS DEL SISTEMA
+# =============================================================================
+Outputs:
+  VpcId:
+    Description: "ID de la VPC creada para la aplicacion"
+    Value: !GetAtt RedStack.Outputs.VpcId
+    Export:
+      Name: !Sub "${ProjectName}-${Environment}-VpcId"
+
+  # Salidas del Backend
+  BackendInstanceId:
+    Description: "ID de la instancia EC2 del Backend"
+    Value: !GetAtt BackendStack.Outputs.BackendInstanceId
+
+  BackendPublicIP:
+    Description: "Direccion IP publica estatica (Elastic IP) del Backend"
+    Value: !GetAtt BackendStack.Outputs.BackendPublicIP
+
+  BackendApiUrl:
+    Description: "URL base del endpoint API NestJS"
+    Value: !GetAtt BackendStack.Outputs.BackendApiUrl
+
+  BackendDocsUrl:
+    Description: "URL de la documentacion Swagger del Backend"
+    Value: !GetAtt BackendStack.Outputs.BackendDocsUrl
+
+  # Salidas del Frontend
+  FrontendInstanceId:
+    Description: "ID de la instancia EC2 del Frontend"
+    Value: !GetAtt FrontendStack.Outputs.FrontendInstanceId
+
+  FrontendPublicIP:
+    Description: "Direccion IP publica estatica (Elastic IP) del Frontend"
+    Value: !GetAtt FrontendStack.Outputs.FrontendPublicIP
+
+  FrontendWebUrl:
+    Description: "URL HTTP de la aplicacion web Frontend en Nginx"
+    Value: !GetAtt FrontendStack.Outputs.FrontendWebUrl
+
+  # Comandos de Administracion y Operacion
+  SSHBackendCommand:
+    Description: "Comando para conectar a la instancia Backend via SSH"
+    Value: !Sub "ssh ${AdminUsername}@${BackendStack.Outputs.BackendPublicIP}"
+
+  SSHFrontendCommand:
+    Description: "Comando para conectar a la instancia Frontend via SSH"
+    Value: !Sub "ssh ${AdminUsername}@${FrontendStack.Outputs.FrontendPublicIP}"
+
+  SSMBackendSessionCommand:
+    Description: "Comando para conectar al Backend via AWS Systems Manager Session Manager (sin necesidad de SSH ni llaves)"
+    Value: !Sub "aws ssm start-session --target ${BackendStack.Outputs.BackendInstanceId}"
+
+  SSMFrontendSessionCommand:
+    Description: "Comando para conectar al Frontend via AWS Systems Manager Session Manager (sin necesidad de SSH ni llaves)"
+    Value: !Sub "aws ssm start-session --target ${FrontendStack.Outputs.FrontendInstanceId}"
+
+  UploadBackendCommand:
+    Description: "Comando sugerido para empaquetar y transferir el codigo del backend (excluyendo node_modules y .env)"
+    Value: !Sub "tar --exclude='node_modules' --exclude='.git' --exclude='dist' --exclude='.env*' -czf backend.tar.gz -C ../../../../asistencia-backend . && scp backend.tar.gz ${AdminUsername}@${BackendStack.Outputs.BackendPublicIP}:/tmp/ && ssh ${AdminUsername}@${BackendStack.Outputs.BackendPublicIP} 'tar -xzf /tmp/backend.tar.gz -C /opt/asistencia-backend && rm /tmp/backend.tar.gz && ~/deploy.sh' && rm backend.tar.gz"
+
+  UploadFrontendCommand:
+    Description: "Comando sugerido para empaquetar y transferir el codigo del frontend (excluyendo node_modules y .env)"
+    Value: !Sub "tar --exclude='node_modules' --exclude='.git' --exclude='dist' --exclude='.env*' -czf frontend.tar.gz -C ../../../../asistencia-front . && scp frontend.tar.gz ${AdminUsername}@${FrontendStack.Outputs.FrontendPublicIP}:/tmp/ && ssh ${AdminUsername}@${FrontendStack.Outputs.FrontendPublicIP} 'tar -xzf /tmp/frontend.tar.gz -C /var/www/asistencia-front && rm /tmp/frontend.tar.gz && ~/deploy.sh' && rm frontend.tar.gz"
+
+  DeployBackendCommand:
+    Description: "Comando para ejecutar la compilacion y arranque del backend en la VM"
+    Value: !Sub "ssh ${AdminUsername}@${BackendStack.Outputs.BackendPublicIP} '~/deploy.sh'"
+
+  DeployFrontendCommand:
+    Description: "Comando para ejecutar la compilacion y recarga del frontend en la VM"
+    Value: !Sub "ssh ${AdminUsername}@${FrontendStack.Outputs.FrontendPublicIP} '~/deploy.sh'"

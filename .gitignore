@@ -1,0 +1,33 @@
+# =============================================================================
+# GITIGNORE: Infraestructura CloudFormation Sistema de Asistencia
+# =============================================================================
+
+# Parametros con secretos, claves de conexion y contrasenas reales
+parametros/*.json
+!parametros/*.example.json
+
+# Archivos temporales de merge generados por scripts de despliegue
+params-merged-*.json
+*.tmp
+*.log
+
+# Paquetes empaquetados para CloudFormation / AWS CLI
+*.packaged.yaml
+template-packaged.yaml
+packaged.yaml
+
+# Archivos de entorno y certificados locales
+.env
+.env.*
+*.pem
+*.pub
+*.key
+
+# Archivos del sistema operativo y editores
+.DS_Store
+Thumbs.db
+ehthumbs.db
+.vscode/
+.idea/
+*.swp
+*~

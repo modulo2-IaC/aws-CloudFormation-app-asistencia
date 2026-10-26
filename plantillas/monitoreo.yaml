@@ -1,0 +1,205 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Modulo de Observabilidad y Monitoreo (Alta Cohesion): Topico SNS de alertas,
+  suscripcion por email, grupos de logs en CloudWatch y alarmas de rendimiento y confiabilidad.
+
+# =============================================================================
+# PARAMETROS DE ENTRADA
+# =============================================================================
+Parameters:
+  ProjectName:
+    Type: String
+    Default: asistencia
+    Description: Nombre base del proyecto.
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - qa
+      - prod
+    Description: Entorno de despliegue (dev, qa, prod).
+
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: "(Opcional) Correo electronico para recibir notificaciones criticas via Amazon SNS."
+
+  BackendInstanceId:
+    Type: String
+    Description: ID de la instancia EC2 del Backend para asociar alarmas de CloudWatch.
+
+  FrontendInstanceId:
+    Type: String
+    Description: ID de la instancia EC2 del Frontend para asociar alarmas de CloudWatch.
+
+# =============================================================================
+# CONDICIONES
+# =============================================================================
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+
+# =============================================================================
+# RECURSOS DE MONITOREO Y OBSERVABILIDAD
+# =============================================================================
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Notificaciones y Alertas (Amazon SNS)
+  # ---------------------------------------------------------------------------
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "topic-alerts-${ProjectName}-${Environment}"
+      KmsMasterKeyId: alias/aws/sns
+      Tags:
+        - Key: Name
+          Value: !Sub "topic-alerts-${ProjectName}-${Environment}"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  AlertsSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # ---------------------------------------------------------------------------
+  # Grupos de Logs de CloudWatch para EC2
+  # ---------------------------------------------------------------------------
+  BackendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "El log group utiliza cifrado estandar administrado por AWS CloudWatch para mantenerse dentro de la capa gratuita (Free Tier)."
+    Properties:
+      LogGroupName: !Sub "/aws/ec2/${ProjectName}-backend-${Environment}"
+      RetentionInDays: 30
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: backend
+
+  FrontendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "El log group utiliza cifrado estandar administrado por AWS CloudWatch para mantenerse dentro de la capa gratuita (Free Tier)."
+    Properties:
+      LogGroupName: !Sub "/aws/ec2/${ProjectName}-frontend-${Environment}"
+      RetentionInDays: 30
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: frontend
+
+  # ---------------------------------------------------------------------------
+  # Alarmas de Rendimiento (CPU Utilization)
+  # ---------------------------------------------------------------------------
+  BackendCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "alarm-ec2-cpu-high-backend-${ProjectName}-${Environment}"
+      AlarmDescription: "Alerta disparada cuando el uso promedio de CPU del backend supera el 80% durante 5 minutos."
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref BackendInstanceId
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  FrontendCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "alarm-ec2-cpu-high-frontend-${ProjectName}-${Environment}"
+      AlarmDescription: "Alerta disparada cuando el uso promedio de CPU del frontend supera el 80% durante 5 minutos."
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref FrontendInstanceId
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  # ---------------------------------------------------------------------------
+  # Alarmas de Confiabilidad y Disponibilidad (Status Checks)
+  # ---------------------------------------------------------------------------
+  BackendStatusCheckAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "alarm-ec2-status-failed-backend-${ProjectName}-${Environment}"
+      AlarmDescription: "Alerta disparada si la comprobacion de estado de hardware o sistema de la instancia Backend falla."
+      MetricName: StatusCheckFailed
+      Namespace: AWS/EC2
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref BackendInstanceId
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  FrontendStatusCheckAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "alarm-ec2-status-failed-frontend-${ProjectName}-${Environment}"
+      AlarmDescription: "Alerta disparada si la comprobacion de estado de hardware o sistema de la instancia Frontend falla."
+      MetricName: StatusCheckFailed
+      Namespace: AWS/EC2
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref FrontendInstanceId
+      AlarmActions:
+        - !Ref AlertsTopic
+
+# =============================================================================
+# SALIDAS DEL MODULO DE MONITOREO
+# =============================================================================
+Outputs:
+  AlertsTopicArn:
+    Description: ARN del topico de notificaciones SNS
+    Value: !Ref AlertsTopic
+
+  BackendLogGroupName:
+    Description: Nombre del grupo de logs en CloudWatch para el Backend
+    Value: !Ref BackendLogGroup
+
+  FrontendLogGroupName:
+    Description: Nombre del grupo de logs en CloudWatch para el Frontend
+    Value: !Ref FrontendLogGroup

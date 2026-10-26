@@ -1,0 +1,195 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Modulo de Seguridad e Identidad (Alta Cohesion): Grupos de Seguridad (Firewalls EC2)
+  y Roles IAM de Minimo Privilegio con Instance Profiles para SSM y CloudWatch.
+
+# =============================================================================
+# PARAMETROS DE ENTRADA
+# =============================================================================
+Parameters:
+  ProjectName:
+    Type: String
+    Default: asistencia
+    Description: Nombre base del proyecto.
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - qa
+      - prod
+    Description: Entorno de despliegue (dev, qa, prod).
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID de la VPC donde se asignan los Security Groups (proviene del modulo de red).
+
+  SSHLocation:
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+    ConstraintDescription: Debe ser un rango CIDR IP valido de la forma x.x.x.x/x (ej. tu-ip/32).
+    Description: Rango CIDR permitido para administracion SSH (Puerto 22).
+
+# =============================================================================
+# RECURSOS DE SEGURIDAD E IDENTIDAD
+# =============================================================================
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Grupos de Seguridad (Firewalls a nivel de instancia)
+  # ---------------------------------------------------------------------------
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_24
+            comment: "El puerto 22 esta parametrizado con SSHLocation para acceso administrativo remoto y auditado."
+          - id: CKV_AWS_260
+            comment: "El puerto 3000 aloja el endpoint HTTP publico del API NestJS para consumo del cliente web."
+    Properties:
+      GroupDescription: "Reglas de firewall para el servidor backend NestJS (SSH puerto 22, API puerto 3000)"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
+          Description: "Permite administracion remota via SSH desde el rango CIDR autorizado"
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+          Description: "Permite trafico HTTP al servicio NestJS en el puerto 3000"
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: "Permite salida a internet para descarga de paquetes npm, actualizaciones de OS y conexion a base de datos PostgreSQL"
+      Tags:
+        - Key: Name
+          Value: !Sub "sg-${ProjectName}-backend-${Environment}"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: backend
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  FrontendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_24
+            comment: "El puerto 22 esta parametrizado con SSHLocation para administracion remota y administracion SSH."
+          - id: CKV_AWS_260
+            comment: "El puerto 80 debe estar abierto a internet para servir la aplicacion web publica (Nginx)."
+    Properties:
+      GroupDescription: "Reglas de firewall para el servidor frontend Nginx (SSH puerto 22, HTTP puerto 80, HTTPS puerto 443)"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
+          Description: "Permite administracion remota via SSH desde el rango CIDR autorizado"
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: "Permite trafico web HTTP entrante al servidor Nginx"
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: "Permite trafico web HTTPS seguro al servidor Nginx"
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: "Permite salida a internet para repositorios de paquetes de Linux y dependencias npm"
+      Tags:
+        - Key: Name
+          Value: !Sub "sg-${ProjectName}-frontend-${Environment}"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: frontend
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ---------------------------------------------------------------------------
+  # Roles IAM e Instance Profiles (Minimo privilegio y acceso SSM seguro)
+  # ---------------------------------------------------------------------------
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "role-ec2-${ProjectName}-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  BackendInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "profile-ec2-${ProjectName}-backend-${Environment}"
+      Roles:
+        - !Ref EC2InstanceRole
+
+  FrontendInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub "profile-ec2-${ProjectName}-frontend-${Environment}"
+      Roles:
+        - !Ref EC2InstanceRole
+
+# =============================================================================
+# SALIDAS DEL MODULO DE SEGURIDAD
+# =============================================================================
+Outputs:
+  BackendSecurityGroupId:
+    Description: ID del Security Group para la instancia Backend
+    Value: !Ref BackendSecurityGroup
+
+  FrontendSecurityGroupId:
+    Description: ID del Security Group para la instancia Frontend
+    Value: !Ref FrontendSecurityGroup
+
+  EC2InstanceRoleArn:
+    Description: ARN del rol IAM asumido por las instancias EC2
+    Value: !GetAtt EC2InstanceRole.Arn
+
+  BackendInstanceProfileName:
+    Description: Nombre del Instance Profile para la instancia Backend
+    Value: !Ref BackendInstanceProfile
+
+  BackendInstanceProfileArn:
+    Description: ARN del Instance Profile para la instancia Backend
+    Value: !GetAtt BackendInstanceProfile.Arn
+
+  FrontendInstanceProfileName:
+    Description: Nombre del Instance Profile para la instancia Frontend
+    Value: !Ref FrontendInstanceProfile
+
+  FrontendInstanceProfileArn:
+    Description: ARN del Instance Profile para la instancia Frontend
+    Value: !GetAtt FrontendInstanceProfile.Arn

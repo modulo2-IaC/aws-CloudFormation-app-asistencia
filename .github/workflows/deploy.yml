@@ -1,0 +1,158 @@
+name: CI/CD CloudFormation - Sistema de Asistencia
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'plantillas/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Accion a ejecutar'
+        required: true
+        default: 'deploy'
+        type: choice
+        options:
+          - deploy
+          - destroy
+      environment:
+        description: 'Entorno de despliegue'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # ===========================================================================
+  # 1. VALIDACION DEVSECOPS (cfn-lint + Checkov)
+  # ===========================================================================
+  lint-and-scan:
+    name: DevSecOps Lint & Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar herramientas de escaneo
+        run: |
+          pip install --upgrade pip
+          pip install cfn-lint checkov
+
+      - name: Validar esquema de plantillas (cfn-lint)
+        run: |
+          echo "Ejecutando cfn-lint en todos los modulos..."
+          for t in plantillas/*.yaml; do
+            cfn-lint -i W3002 -- "$t"
+            echo "✓ $t validado"
+          done
+
+      - name: Escaneo de seguridad y cumplimiento (Checkov)
+        run: |
+          echo "Ejecutando Checkov..."
+          checkov -d plantillas/ --framework cloudformation --output cli
+
+  # ===========================================================================
+  # 2. DESPLIEGUE O DESTRUCCION EN AWS
+  # ===========================================================================
+  deploy:
+    name: Despliegue en AWS
+    needs: lint-and-scan
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-2' }}
+      STACK_NAME: stack-asistencia-${{ inputs.environment || 'dev' }}
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # -----------------------------------------------------------------------
+      # CASO 1: DESTRUCCION DEL STACK
+      # -----------------------------------------------------------------------
+      - name: Destruir Stack (si fue solicitado)
+        if: ${{ inputs.action == 'destroy' }}
+        run: |
+          chmod +x scripts/destroy.sh
+          ./scripts/destroy.sh "${{ env.STACK_NAME }}" "${{ env.AWS_REGION }}" --force
+
+      # -----------------------------------------------------------------------
+      # CASO 2: APROVISIONAMIENTO / DESPLIEGUE DEL STACK
+      # -----------------------------------------------------------------------
+      - name: Inyectar parametros desde GitHub Secrets
+        if: ${{ inputs.action != 'destroy' }}
+        run: |
+          mkdir -p parametros
+
+          # 1. Parametros de Infraestructura
+          cat << EOF > parametros/infra.json
+          [
+            {"ParameterKey": "ProjectName", "ParameterValue": "asistencia"},
+            {"ParameterKey": "Environment", "ParameterValue": "${{ inputs.environment || 'dev' }}"},
+            {"ParameterKey": "InstanceType", "ParameterValue": "${{ vars.INSTANCE_TYPE || 't3.micro' }}"},
+            {"ParameterKey": "KeyName", "ParameterValue": "${{ vars.KEY_NAME || '' }}"},
+            {"ParameterKey": "AdminUsername", "ParameterValue": "ubuntu"},
+            {"ParameterKey": "AdminPassword", "ParameterValue": "${{ secrets.ADMIN_PASSWORD || '' }}"},
+            {"ParameterKey": "SSHLocation", "ParameterValue": "${{ vars.SSH_LOCATION || '0.0.0.0/0' }}"},
+            {"ParameterKey": "AlertEmail", "ParameterValue": "${{ secrets.ALERT_EMAIL || '' }}"}
+          ]
+          EOF
+
+          # 2. Parametros de Backend
+          cat << EOF > parametros/backend.json
+          [
+            {"ParameterKey": "DatabaseUrl", "ParameterValue": "${{ secrets.DATABASE_URL }}"},
+            {"ParameterKey": "JwtSecret", "ParameterValue": "${{ secrets.JWT_SECRET }}"},
+            {"ParameterKey": "CorsOrigin", "ParameterValue": "${{ vars.CORS_ORIGIN || '*' }}"},
+            {"ParameterKey": "AppTimezone", "ParameterValue": "${{ vars.APP_TIMEZONE || 'America/Caracas' }}"},
+            {"ParameterKey": "RunMigrations", "ParameterValue": "${{ vars.RUN_MIGRATIONS || 'true' }}"},
+            {"ParameterKey": "NodeVersion", "ParameterValue": "20"},
+            {"ParameterKey": "BackendRepoUrl", "ParameterValue": "${{ vars.BACKEND_REPO_URL || 'https://github.com/Joandrr/asistencia-back.git' }}"}
+          ]
+          EOF
+
+          # 3. Parametros de Frontend
+          cat << EOF > parametros/frontend.json
+          [
+            {"ParameterKey": "FrontendRepoUrl", "ParameterValue": "${{ vars.FRONTEND_REPO_URL || 'https://github.com/Joandrr/asistencia-front.git' }}"}
+          ]
+          EOF
+
+      - name: Desplegar Stacks Anidados via deploy.sh
+        if: ${{ inputs.action != 'destroy' }}
+        run: |
+          chmod +x scripts/deploy.sh
+          ./scripts/deploy.sh "${{ env.STACK_NAME }}" "${{ env.AWS_REGION }}"
+
+      - name: Publicar Resumen de Despliegue en GitHub
+        if: ${{ inputs.action != 'destroy' && success() }}
+        run: |
+          echo "### 🚀 Despliegue CloudFormation Exitoso" >> $GITHUB_STEP_SUMMARY
+          echo "**Stack:** \`${{ env.STACK_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Region:** \`${{ env.AWS_REGION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Salidas del Stack:" >> $GITHUB_STEP_SUMMARY
+          aws cloudformation describe-stacks \
+            --stack-name "${{ env.STACK_NAME }}" \
+            --region "${{ env.AWS_REGION }}" \
+            --query "Stacks[0].Outputs[*].[OutputKey,OutputValue]" \
+            --output table >> $GITHUB_STEP_SUMMARY

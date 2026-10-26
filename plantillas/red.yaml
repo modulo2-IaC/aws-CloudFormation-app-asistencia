@@ -1,0 +1,225 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Modulo de Red (Alta Cohesion): VPC, Subredes aisladas para Backend y Frontend,
+  Internet Gateway, Tablas de Enrutamiento y VPC Flow Logs con CloudWatch.
+
+# =============================================================================
+# PARAMETROS DE ENTRADA
+# =============================================================================
+Parameters:
+  ProjectName:
+    Type: String
+    Default: asistencia
+    Description: Nombre base del proyecto utilizado para etiquetar y nombrar los recursos.
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - qa
+      - prod
+    Description: Entorno de despliegue (dev, qa, prod).
+
+# =============================================================================
+# RECURSOS DE RED
+# =============================================================================
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # VPC y Pasarela de Internet (Internet Gateway)
+  # ---------------------------------------------------------------------------
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "vpc-${ProjectName}-${Environment}"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "igw-${ProjectName}-${Environment}"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  # ---------------------------------------------------------------------------
+  # Tabla de Enrutamiento y Ruta hacia Internet
+  # ---------------------------------------------------------------------------
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "rt-public-${ProjectName}-${Environment}"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  # ---------------------------------------------------------------------------
+  # Subredes para Backend y Frontend
+  # ---------------------------------------------------------------------------
+  BackendSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "subnet-${ProjectName}-backend-${Environment}"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: backend
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  FrontendSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub "subnet-${ProjectName}-frontend-${Environment}"
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Component
+          Value: frontend
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  BackendSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref BackendSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  FrontendSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref FrontendSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # ---------------------------------------------------------------------------
+  # VPC Flow Logs (Auditoria de trafico de red CIS AWS / Checkov CKV2_AWS_11)
+  # ---------------------------------------------------------------------------
+  VPCFlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_158
+            comment: "El log group utiliza cifrado estandar administrado por AWS CloudWatch para mantenerse dentro de la capa gratuita (Free Tier)."
+    Properties:
+      LogGroupName: !Sub "/aws/vpc-flow-logs/${ProjectName}-${Environment}"
+      RetentionInDays: 30
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref Environment
+
+  VPCFlowLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "role-vpc-flow-logs-${ProjectName}-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: VPCFlowLogsDeliveryPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                Resource: !GetAtt VPCFlowLogGroup.Arn
+
+  VPCFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      ResourceId: !Ref VPC
+      ResourceType: VPC
+      TrafficType: ALL
+      DeliverLogsPermissionArn: !GetAtt VPCFlowLogRole.Arn
+      LogDestination: !GetAtt VPCFlowLogGroup.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub "flow-log-${ProjectName}-${Environment}"
+        - Key: Project
+          Value: !Ref ProjectName
+
+# =============================================================================
+# SALIDAS DEL MODULO DE RED
+# =============================================================================
+Outputs:
+  VpcId:
+    Description: ID de la VPC creada para la aplicacion
+    Value: !Ref VPC
+
+  BackendSubnetId:
+    Description: ID de la subred para el servidor Backend
+    Value: !Ref BackendSubnet
+
+  FrontendSubnetId:
+    Description: ID de la subred para el servidor Frontend
+    Value: !Ref FrontendSubnet
+
+  PublicRouteTableId:
+    Description: ID de la tabla de rutas publica asociada a las subredes
+    Value: !Ref PublicRouteTable
+
+  VPCFlowLogGroupId:
+    Description: Nombre/ARN del grupo de logs para VPC Flow Logs
+    Value: !Ref VPCFlowLogGroup
