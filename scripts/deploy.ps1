@@ -18,7 +18,10 @@ param(
     [switch]$SkipScan,
 
     [Parameter()]
-    [switch]$DryRun
+    [switch]$DryRun,
+
+    [Parameter()]
+    [switch]$NoExecute
 )
 
 $ErrorActionPreference = "Stop"
@@ -203,6 +206,10 @@ $deployArgs = @(
     "--parameter-overrides", "$mergedUri"
 )
 
+if ($NoExecute) {
+    $deployArgs += "--no-execute-changeset"
+}
+
 & aws @deployArgs
 $deployExit = $LASTEXITCODE
 
@@ -210,6 +217,16 @@ Remove-Item $MergedFile -ErrorAction SilentlyContinue
 Remove-Item $PackagedFile -ErrorAction SilentlyContinue
 
 if ($deployExit -eq 0) {
+    if ($NoExecute) {
+        Write-Host "`n============================================================" -ForegroundColor Yellow
+        Write-Host "  [CHANGE SET CREADO CON EXITO EN AWS CLOUDFORMATION]" -ForegroundColor Yellow
+        Write-Host "============================================================" -ForegroundColor Yellow
+        Write-Host "El conjunto de cambios (Change Set) ha sido generado para revision." -ForegroundColor Cyan
+        Write-Host "Puedes auditar el impacto en la consola web de AWS (CloudFormation > Stacks > $StackName > Change sets)" -ForegroundColor White
+        Write-Host "O ejecutarlo mediante la consola web o 'aws cloudformation execute-change-set'." -ForegroundColor White
+        exit 0
+    }
+
     Write-Host "`n============================================================" -ForegroundColor Green
     Write-Host "  ¡DESPLIEGUE COMPLETADO CON EXITO EN AWS!" -ForegroundColor Green
     Write-Host "============================================================" -ForegroundColor Green
