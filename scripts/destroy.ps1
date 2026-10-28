@@ -79,6 +79,16 @@ Write-Host "`n[4/4] Esperando a que todos los recursos se eliminen (esto puede t
 aws cloudformation wait stack-delete-complete --stack-name "$StackName" --region "$Region"
 
 if ($LASTEXITCODE -eq 0) {
+    # Limpiar log groups asociados que no se eliminan automaticamente
+    $orphanLogs = @(
+        "/aws/vpc-flow-logs/asistencia-dev",
+        "/aws/ec2/asistencia-backend-dev",
+        "/aws/ec2/asistencia-frontend-dev"
+    )
+    foreach ($lg in $orphanLogs) {
+        aws logs delete-log-group --log-group-name "$lg" --region "$Region" 2>$null | Out-Null
+    }
+
     Write-Host "`n============================================================" -ForegroundColor Green
     Write-Host "  Stack '$StackName' y todos sus recursos eliminados con exito!" -ForegroundColor Green
     Write-Host "============================================================" -ForegroundColor Green

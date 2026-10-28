@@ -154,6 +154,22 @@ if ($stackStatus -eq "ROLLBACK_COMPLETE") {
     Write-Host "  [OK] Stack previo eliminado con exito." -ForegroundColor Green
 }
 
+# Limpieza preventiva de Log Groups huerfanos que podrian causar conflicto de nombres
+if (-not $stackStatus -or $stackStatus -eq "None" -or $stackStatus -eq "ROLLBACK_COMPLETE") {
+    $orphanLogs = @(
+        "/aws/vpc-flow-logs/asistencia-dev",
+        "/aws/ec2/asistencia-backend-dev",
+        "/aws/ec2/asistencia-frontend-dev"
+    )
+    foreach ($lg in $orphanLogs) {
+        $exists = (aws logs describe-log-groups --log-group-name-prefix "$lg" --region "$Region" --query "logGroups[?logGroupName=='$lg'].logGroupName | [0]" --output text 2>$null)
+        if ($exists -and $exists -ne "None") {
+            Write-Host "  [INFO] Limpiando Log Group huerfano previo ($lg)..." -ForegroundColor Yellow
+            aws logs delete-log-group --log-group-name "$lg" --region "$Region" 2>$null | Out-Null
+        }
+    }
+}
+
 # -----------------------------------------------------------------------------
 # 5. EMPAQUETADO DE PLANTILLAS ANIDADAS (aws cloudformation package)
 # -----------------------------------------------------------------------------
