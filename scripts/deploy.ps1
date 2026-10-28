@@ -133,17 +133,12 @@ if (-not $S3Bucket) {
         $S3Bucket = $detected
         Write-Host "  [OK] Bucket S3 detectado automaticamente: $S3Bucket" -ForegroundColor Green
     } else {
-        Write-Host "  [WARN] No se detecto bucket automatico en $Region. Buscando cualquier cf-templates..." -ForegroundColor Yellow
-        $detectedAny = (aws s3api list-buckets --query "Buckets[?contains(Name, 'cf-templates')].Name | [0]" --output text 2>$null)
-        if ($detectedAny -and $detectedAny -ne "None") {
-            $S3Bucket = $detectedAny
-            Write-Host "  [OK] Usando bucket S3: $S3Bucket" -ForegroundColor Green
-        } else {
-            Write-Host "  [ERROR] Se requiere un bucket S3 para empaquetar las plantillas anidadas." -ForegroundColor Red
-            Write-Host "  Especifica uno con -S3Bucket <nombre-bucket> o crea uno en $Region." -ForegroundColor Yellow
-            Remove-Item $MergedFile -ErrorAction SilentlyContinue
-            exit 1
-        }
+        $accId = (aws sts get-caller-identity --query "Account" --output text 2>$null)
+        $newBucket = "cf-templates-$accId-$Region"
+        Write-Host "  [INFO] No se detecto bucket en $Region. Creando bucket regional: $newBucket..." -ForegroundColor Yellow
+        aws s3 mb "s3://$newBucket" --region "$Region" | Out-Null
+        $S3Bucket = $newBucket
+        Write-Host "  [OK] Bucket S3 regional creado y listo: $S3Bucket" -ForegroundColor Green
     }
 }
 
