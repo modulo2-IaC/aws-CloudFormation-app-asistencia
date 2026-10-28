@@ -86,7 +86,12 @@ if ($LASTEXITCODE -eq 0) {
         "/aws/ec2/asistencia-frontend-dev"
     )
     foreach ($lg in $orphanLogs) {
-        aws logs delete-log-group --log-group-name "$lg" --region "$Region" 2>$null | Out-Null
+        $prevEA = $ErrorActionPreference
+        $ErrorActionPreference = "SilentlyContinue"
+        try {
+            aws logs delete-log-group --log-group-name "$lg" --region "$Region" 2>&1 | Out-Null
+        } catch {}
+        $ErrorActionPreference = $prevEA
     }
 
     Write-Host "`n============================================================" -ForegroundColor Green
