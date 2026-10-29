@@ -81,7 +81,7 @@ Resources:
         - Key: Team
           Value: DevSecOps
         - Key: Version
-          Value: "1.1"  
+          Value: "1.2"  
 
   FrontendSecurityGroup:
     Type: AWS::EC2::SecurityGroup
