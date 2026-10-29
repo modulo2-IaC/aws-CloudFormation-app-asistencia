@@ -126,6 +126,10 @@ Resources:
           Value: frontend
         - Key: ManagedBy
           Value: CloudFormation
+        - Key: Team
+          Value: DevSecOps
+        - Key: Version
+          Value: "1.2"
 
   # ---------------------------------------------------------------------------
   # Roles IAM e Instance Profiles (Minimo privilegio y acceso SSM seguro)
