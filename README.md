@@ -149,27 +149,26 @@ En **Settings** > **Secrets and variables** > **Actions** > pestaña **Variables
 
 Dado que la arquitectura utiliza **Stacks Anidados (Nested Stacks)**, CloudFormation necesita acceder a las plantillas hijas desde un bucket S3.
 
-#### Paso 1: Empaquetar y subir las plantillas a Amazon S3
-Ejecuta en tu terminal el comando oficial de empaquetado (usa el bucket predeterminado de CloudFormation de tu region):
-```bash
-# Empaqueta las plantillas modulares y genera un archivo consolidado listo para la consola:
-aws cloudformation package \
-  --template-file plantillas/main.yaml \
-  --s3-bucket cf-templates-5yh14sa9ef09-us-east-2 \
-  --output-template-file template-packaged.yaml
-```
-*(Tambien puedes subir la carpeta `plantillas/` completa a tu bucket S3 y usar la URL del objeto de `main.yaml`).*
+#### Paso 1: Empaquetar y Subir las Plantillas a S3 con Nombres por Stack
+Al ejecutar `deploy.ps1`, cada modulo se sube automaticamente a tu bucket S3 regional dentro de la carpeta del stack (`stack-asistencia-dev/`) con nombres transparentes que corresponden a cada módulo anidado:
 
-#### Paso 2: Crear el Stack en CloudFormation
+* `s3://cf-templates-5yh14sa9ef09-us-east-2/stack-asistencia-dev/RedStack.yaml` (Red)
+* `s3://cf-templates-5yh14sa9ef09-us-east-2/stack-asistencia-dev/SeguridadStack.yaml` (Seguridad)
+* `s3://cf-templates-5yh14sa9ef09-us-east-2/stack-asistencia-dev/BackendStack.yaml` (Backend)
+* `s3://cf-templates-5yh14sa9ef09-us-east-2/stack-asistencia-dev/FrontendStack.yaml` (Frontend)
+* `s3://cf-templates-5yh14sa9ef09-us-east-2/stack-asistencia-dev/MonitoreoStack.yaml` (Monitoreo)
+* `s3://cf-templates-5yh14sa9ef09-us-east-2/stack-asistencia-dev/main.yaml` *(Orquestador)*
+
+#### Paso 2: Crear el Stack en CloudFormation (Consola Web)
 1. Inicia sesion en la [Consola de Administracion de AWS](https://console.aws.amazon.com/).
-2. Asegurate de estar en la region **us-east-2 (Ohio)** (o tu region objetivo).
+2. Asegurate de estar en la region **us-east-2 (Ohio)**.
 3. En la barra de busqueda superior, escribe **CloudFormation** y selecciona el servicio.
 4. Haz clic en el boton naranja **Create stack** > **With new resources (standard)**.
-5. En la seccion **Prerequisite - Prepare template**, selecciona:
-   * **Template is ready**
-6. En la seccion **Specify template**, selecciona:
-   * **Upload a template file** y pulsa **Choose file**.
-   * Selecciona el archivo `template-packaged.yaml` generado en el Paso 1.
+5. En la seccion **Prerequisite - Prepare template**, selecciona **Template is ready**.
+6. En la seccion **Specify template**, puedes elegir:
+   * **Amazon S3 URL (Recomendado):** Ingresa directamente la URL S3 de la plantilla orquestadora:
+     `https://cf-templates-5yh14sa9ef09-us-east-2.s3.us-east-2.amazonaws.com/stack-asistencia-dev/main.yaml`
+   * O **Upload a template file** y sube el archivo empaquetado.
 7. Haz clic en **Next**.
 
 #### Paso 3: Especificar Detalles del Stack (Parametros)

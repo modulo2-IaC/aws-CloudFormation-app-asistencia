@@ -174,22 +174,51 @@ if (-not $stackStatus -or $stackStatus -eq "None" -or $stackStatus -eq "ROLLBACK
 }
 
 # -----------------------------------------------------------------------------
-# 5. EMPAQUETADO DE PLANTILLAS ANIDADAS (aws cloudformation package)
+# 5. SUBIDA Y EMPAQUETADO DE PLANTILLAS CON NOMBRES CLAROS POR STACK EN S3
 # -----------------------------------------------------------------------------
-Write-Host "`nEmpaquetando modulos anidados hacia S3 ($S3Bucket)..." -ForegroundColor Cyan
-$PackagedFile = Join-Path $env:TEMP "packaged-$StackName.yaml"
-aws cloudformation package `
-    --template-file "$TemplateFile" `
-    --s3-bucket "$S3Bucket" `
-    --output-template-file "$PackagedFile" `
-    --region "$Region"
+Write-Host "`nSubiendo modulos anidados a S3 con identificacion por Stack ($S3Bucket/$StackName/)..." -ForegroundColor Cyan
 
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "  [ERROR] Fallo el empaquetado de las plantillas hacia S3." -ForegroundColor Red
-    Remove-Item $MergedFile -ErrorAction SilentlyContinue
-    exit 1
+$modules = @(
+    @{ Stack = "RedStack";       File = "red.yaml";       Desc = "Modulo de Red (VPC, Subnets, Routing)" },
+    @{ Stack = "SeguridadStack"; File = "seguridad.yaml"; Desc = "Modulo de Seguridad (Security Groups, IAM Roles)" },
+    @{ Stack = "BackendStack";   File = "backend.yaml";   Desc = "Modulo de Computo Backend (EC2 NestJS, EIP)" },
+    @{ Stack = "FrontendStack";  File = "frontend.yaml";  Desc = "Modulo de Computo Frontend (EC2 Vite, Nginx)" },
+    @{ Stack = "MonitoreoStack"; File = "monitoreo.yaml"; Desc = "Modulo de Observabilidad (Dashboard, Alarmas)" }
+)
+
+$mainContent = Get-Content -Path $TemplateFile -Raw -Encoding UTF8
+
+foreach ($m in $modules) {
+    $srcPath = Join-Path $TemplateDir $m.File
+    $s3KeyNamed = "$StackName/$($m.Stack).yaml"
+    $s3KeyAlias = "$StackName/$($m.File)"
+
+    # Subir con nombre de Stack (ej: stack-asistencia-dev/RedStack.yaml)
+    aws s3 cp "$srcPath" "s3://$S3Bucket/$s3KeyNamed" --region "$Region" | Out-Null
+    # Subir alias con nombre del modulo local (ej: stack-asistencia-dev/red.yaml)
+    aws s3 cp "$srcPath" "s3://$S3Bucket/$s3KeyAlias" --region "$Region" | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  [ERROR] Fallo la subida a S3 de $($m.File)" -ForegroundColor Red
+        Remove-Item $MergedFile -ErrorAction SilentlyContinue
+        exit 1
+    }
+
+    Write-Host "  [OK] s3://$S3Bucket/$s3KeyNamed ($($m.Desc))" -ForegroundColor Green
+
+    $s3Url = "https://$S3Bucket.s3.$Region.amazonaws.com/$s3KeyNamed"
+    $mainContent = $mainContent.Replace("./$($m.File)", $s3Url).Replace("TemplateURL: $($m.File)", "TemplateURL: $s3Url")
 }
-Write-Host "  [OK] Plantillas anidadas empaquetadas y subidas a S3 con exito." -ForegroundColor Green
+
+# Generar archivo empaquetado temporal
+$PackagedFile = Join-Path $env:TEMP "packaged-$StackName.yaml"
+[System.IO.File]::WriteAllText($PackagedFile, $mainContent, (New-Object System.Text.UTF8Encoding($false)))
+
+# Subir la plantilla principal empaquetada a S3 con nombres descriptivos
+aws s3 cp "$PackagedFile" "s3://$S3Bucket/$StackName/main.yaml" --region "$Region" | Out-Null
+aws s3 cp "$PackagedFile" "s3://$S3Bucket/$StackName/$StackName.yaml" --region "$Region" | Out-Null
+Write-Host "  [OK] s3://$S3Bucket/$StackName/main.yaml (Plantilla Principal Orquestadora)" -ForegroundColor Green
+Write-Host "  [OK] Todas las plantillas subidas con nombres de Stack legibles a S3." -ForegroundColor Green
 
 # -----------------------------------------------------------------------------
 # 6. DESPLIEGUE
