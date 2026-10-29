@@ -191,12 +191,9 @@ $mainContent = Get-Content -Path $TemplateFile -Raw -Encoding UTF8
 foreach ($m in $modules) {
     $srcPath = Join-Path $TemplateDir $m.File
     $s3KeyNamed = "$StackName/$($m.Stack).yaml"
-    $s3KeyAlias = "$StackName/$($m.File)"
 
-    # Subir con nombre de Stack (ej: stack-asistencia-dev/RedStack.yaml)
+    # Subir exactamente con el nombre de su Stack en AWS
     aws s3 cp "$srcPath" "s3://$S3Bucket/$s3KeyNamed" --region "$Region" | Out-Null
-    # Subir alias con nombre del modulo local (ej: stack-asistencia-dev/red.yaml)
-    aws s3 cp "$srcPath" "s3://$S3Bucket/$s3KeyAlias" --region "$Region" | Out-Null
 
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  [ERROR] Fallo la subida a S3 de $($m.File)" -ForegroundColor Red
@@ -214,11 +211,10 @@ foreach ($m in $modules) {
 $PackagedFile = Join-Path $env:TEMP "packaged-$StackName.yaml"
 [System.IO.File]::WriteAllText($PackagedFile, $mainContent, (New-Object System.Text.UTF8Encoding($false)))
 
-# Subir la plantilla principal empaquetada a S3 con nombres descriptivos
+# Subir la plantilla principal orquestadora a S3 (exactamente 6 archivos en total)
 aws s3 cp "$PackagedFile" "s3://$S3Bucket/$StackName/main.yaml" --region "$Region" | Out-Null
-aws s3 cp "$PackagedFile" "s3://$S3Bucket/$StackName/$StackName.yaml" --region "$Region" | Out-Null
 Write-Host "  [OK] s3://$S3Bucket/$StackName/main.yaml (Plantilla Principal Orquestadora)" -ForegroundColor Green
-Write-Host "  [OK] Todas las plantillas subidas con nombres de Stack legibles a S3." -ForegroundColor Green
+Write-Host "  [OK] Exactamente 6 plantillas sincronizadas en S3 (1 orquestador + 5 stacks anidados)." -ForegroundColor Green
 
 # -----------------------------------------------------------------------------
 # 6. DESPLIEGUE

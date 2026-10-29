@@ -110,7 +110,6 @@ for item in "${MODULES[@]}"; do
     f="${item%%:*}"
     stack_yaml="${item##*:}"
     aws s3 cp "$TEMPLATE_DIR/$f" "s3://$S3_BUCKET/$STACK_NAME/$stack_yaml" --region "$REGION" > /dev/null
-    aws s3 cp "$TEMPLATE_DIR/$f" "s3://$S3_BUCKET/$STACK_NAME/$f" --region "$REGION" > /dev/null
     s3_url="https://${S3_BUCKET}.s3.${REGION}.amazonaws.com/${STACK_NAME}/${stack_yaml}"
     sed -i "s|\./$f|$s3_url|g" "$PACKAGED_FILE"
     sed -i "s|TemplateURL: $f|TemplateURL: $s3_url|g" "$PACKAGED_FILE"
@@ -118,7 +117,6 @@ for item in "${MODULES[@]}"; do
 done
 
 aws s3 cp "$PACKAGED_FILE" "s3://$S3_BUCKET/$STACK_NAME/main.yaml" --region "$REGION" > /dev/null
-aws s3 cp "$PACKAGED_FILE" "s3://$S3_BUCKET/$STACK_NAME/${STACK_NAME}.yaml" --region "$REGION" > /dev/null
 echo "  [OK] s3://$S3_BUCKET/$STACK_NAME/main.yaml (Orquestador)"
 
 # 6. Despliegue
